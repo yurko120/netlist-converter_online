@@ -1,7 +1,8 @@
 import streamlit as st
 import io
+import re
 
-# --- CORE LOGIC (Footprints, Nets, Dots & Underscores) ---
+# --- CORE LOGIC ---
 def process_single_file(uploaded_file):
     content = uploaded_file.getvalue().decode('cp1255', errors='ignore')
     lines = content.splitlines()
@@ -30,18 +31,27 @@ def process_single_file(uploaded_file):
             temp_line = line.replace('!', ' ').replace(';', ' ')
             parts = temp_line.split()
             if len(parts) >= 2:
-                # Replace dots with underscores in Footprint name
-                pkg_id = parts[0].replace('.', '_')
+                # 1. Take the Footprint name
+                pkg_id = parts[0]
+                
+                # 2. Remove anything inside parentheses, including the parentheses themselves
+                pkg_id = re.sub(r'\(.*?\)', '', pkg_id)
+                
+                # 3. Replace dots and commas with underscores
+                pkg_id = pkg_id.replace('.', '_').replace(',', '_')
+                
+                # 4. Convert to Uppercase
+                pkg_id = pkg_id.upper()
+                
                 des = parts[-1]
                 if len(parts) > 2:
                     val = parts[1]
                     packages.append(f"!{pkg_id}! {val}; {des}")
                 else:
-                    # Empty value column with semicolon
                     packages.append(f"!{pkg_id}! ; {des}")
 
         elif zone == "END":
-            # Convert dash to dot for pins (e.g., U46-C22 -> U46.C22)
+            # Convert dash to dot for pins
             processed_line = line.replace('-', '.')
             clean_line = processed_line.replace(',', ' ').replace(';', ' ').replace('*', ' ')
             parts = clean_line.split()
@@ -76,13 +86,11 @@ logo_url = "https://raw.githubusercontent.com/yurko120/netlist-converter/main/.d
 
 st.markdown(f"""
     <style>
-    /* 1. Animation Definition */
     @keyframes slideInFromTop {{
         0% {{ transform: translateY(-50px); opacity: 0; }}
         60% {{ transform: translateY(10px); opacity: 1; }}
         100% {{ transform: translateY(0); opacity: 1; }}
     }}
-
     .stApp {{
         background-image: url("{logo_url}");
         background-repeat: no-repeat;
@@ -97,18 +105,14 @@ st.markdown(f"""
         background-color: rgba(255, 255, 255, 0.92); 
         z-index: -1;
     }}
-
-    /* 2. Applying Animation to Title */
     .centered-title {{
         text-align: center;
         color: #000000;
         font-size: 2.8em !important; 
         font-weight: 900 !important; 
         margin-bottom: 20px !important;
-        /* Animation call */
         animation: slideInFromTop 1.2s ease-out;
     }}
-
     [data-testid="stTextInput"] label {{
         font-size: 1rem !important; 
         font-weight: 700 !important; 
@@ -158,10 +162,11 @@ if uploaded_files:
     st.divider()
     st.subheader("🔍 Technical Preview (Per File)")
     tab_titles = [item["display_name"] for item in processed_files_data]
-    tabs = st.tabs(tab_titles)
-    for idx, tab in enumerate(tabs):
-        with tab:
-            st.text_area(f"Preview: {processed_files_data[idx]['display_name']}", 
-                         value=processed_files_data[idx]['content'], 
-                         height=450, 
-                         key=f"preview_text_{idx}")
+    if tab_titles:
+        tabs = st.tabs(tab_titles)
+        for idx, tab in enumerate(tabs):
+            with tab:
+                st.text_area(f"Preview: {processed_files_data[idx]['display_name']}", 
+                             value=processed_files_data[idx]['content'], 
+                             height=450, 
+                             key=f"preview_text_{idx}")
