@@ -3,6 +3,12 @@ import io
 import re
 
 # --- CORE LOGIC: Footprint and Netlist Transformation ---
+def clean_special_chars(text):
+    """Removes specific illegal characters from the given text."""
+    # List of characters to remove: / * \ # @ & ^ % ?
+    pattern = r"[/\\*#@&^%?]"
+    return re.sub(pattern, "", text)
+
 def process_single_file(uploaded_file):
     content = uploaded_file.getvalue().decode('cp1255', errors='ignore')
     lines = content.splitlines()
@@ -31,41 +37,37 @@ def process_single_file(uploaded_file):
 
         # Processing Footprints Section
         if zone == "START":
-            # Clean separators to make splitting reliable
+            # Apply global character cleaning first
+            line = clean_special_chars(line)
             clean_line = line.replace('!', ' ').replace(';', ' ')
             parts = clean_line.split()
             
             if len(parts) >= 2:
-                # Logic: Footprint is usually the first part, Designator is the last.
-                # If there are 3 parts, the middle one is the Value.
                 pkg_id = parts[0]
                 des = parts[-1]
                 val = parts[1] if len(parts) > 2 else ""
                 
-                # Validation: If pkg_id is too short (e.g., U1), it might be a missing footprint
-                # In netlists, footprints are usually longer than designators.
                 if len(pkg_id) < 2:
                     continue
 
-                # Footprint Name Sanitization
-                # 1. Remove everything inside parentheses (e.g., GRF(13) -> GRF)
-                pkg_id = re.sub(r'\(.*?\)', '', pkg_id)
-                # 2. Replace illegal characters (dots, commas) with underscores
-                pkg_id = pkg_id.replace('.', '_').replace(',', '_')
-                # 3. Force Uppercase
-                pkg_id = pkg_id.upper()
+                # Specific Footprint Sanitization
+                pkg_id = re.sub(r'\(.*?\)', '', pkg_id) # Remove parentheses
+                pkg_id = pkg_id.replace('.', '_').replace(',', '_') # Replace dots/commas
+                pkg_id = pkg_id.upper() # Force Uppercase
                 
                 packages.append(f"!{pkg_id}! {val}; {des}")
 
         # Processing Nets Section
         elif zone == "END":
+            # Apply global character cleaning
+            line = clean_special_chars(line)
             # Convert pin separator '-' to '.'
             processed_line = line.replace('-', '.')
-            clean_line = processed_line.replace(',', ' ').replace(';', ' ').replace('*', ' ')
+            clean_line = processed_line.replace(',', ' ').replace(';', ' ')
             parts = clean_line.split()
             if not parts: continue
             
-            if not raw_line.startswith((' ', '\t', '*')):
+            if not raw_line.startswith((' ', '\t')):
                 current_net = parts[0]
                 if current_net not in nets_data:
                     nets_data[current_net] = []
@@ -121,12 +123,6 @@ st.markdown(f"""
         font-weight: 900 !important; 
         margin-bottom: 20px !important;
         animation: slideInFromTop 1.2s ease-out;
-    }}
-    [data-testid="stTextInput"] label {{
-        font-size: 1rem !important; 
-        font-weight: 700 !important; 
-        color: #000000 !important;
-        padding-bottom: 8px !important;
     }}
     .stTextArea textarea {{
         background-color: rgba(255, 255, 255, 0.6) !important; 
