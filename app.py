@@ -28,30 +28,41 @@ def process_single_file(uploaded_file):
             continue
 
         if zone == "START":
-            temp_line = line.replace('!', ' ').replace(';', ' ')
-            parts = temp_line.split()
-            if len(parts) >= 2:
-                # 1. Take the Footprint name
-                pkg_id = parts[0]
+            # טיפול חכם בשורות שבהן חסר ערך (Value)
+            if '!' in line:
+                # אם יש סימני קריאה, נחלץ את מה שביניהם כ-Footprint
+                parts = line.split('!')
+                pkg_id = parts[1].strip() if len(parts) > 1 else ""
+                rest = parts[2].strip() if len(parts) > 2 else ""
                 
-                # 2. Remove anything inside parentheses, including the parentheses themselves
-                pkg_id = re.sub(r'\(.*?\)', '', pkg_id)
-                
-                # 3. Replace dots and commas with underscores
-                pkg_id = pkg_id.replace('.', '_').replace(',', '_')
-                
-                # 4. Convert to Uppercase
-                pkg_id = pkg_id.upper()
-                
-                des = parts[-1]
-                if len(parts) > 2:
-                    val = parts[1]
-                    packages.append(f"!{pkg_id}! {val}; {des}")
+                # ניקוי השארית (Value ו-Designator)
+                rest_parts = rest.replace(';', ' ').split()
+                val = rest_parts[0] if len(rest_parts) > 1 else ""
+                des = rest_parts[-1] if len(rest_parts) > 0 else ""
+            else:
+                # אם אין סימני קריאה, נשתמש בהפרדה לפי רווחים/נקודה-פסיק
+                temp_line = line.replace(';', ' ')
+                parts = temp_line.split()
+                if len(parts) >= 2:
+                    pkg_id = parts[0]
+                    des = parts[-1]
+                    val = parts[1] if len(parts) > 2 else ""
                 else:
-                    packages.append(f"!{pkg_id}! ; {des}")
+                    continue
+
+            # ניקוי שם האריזה (Footprint) לפי החוקים החדשים
+            # 1. הסרת סוגריים ותוכנם
+            pkg_id = re.sub(r'\(.*?\)', '', pkg_id)
+            # 2. המרת נקודות ופסיקים לקו תחתון
+            pkg_id = pkg_id.replace('.', '_').replace(',', '_')
+            # 3. המרת אותיות לגדולות
+            pkg_id = pkg_id.upper()
+            
+            # בניית השורה מחדש בצורה תקינה
+            packages.append(f"!{pkg_id}! {val}; {des}")
 
         elif zone == "END":
-            # Convert dash to dot for pins
+            # המרת מקף לנקודה עבור פינים
             processed_line = line.replace('-', '.')
             clean_line = processed_line.replace(',', ' ').replace(';', ' ').replace('*', ' ')
             parts = clean_line.split()
