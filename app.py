@@ -1,7 +1,7 @@
 import streamlit as st
 import io
 
-# --- CORE LOGIC ---
+# --- CORE LOGIC (Footprints, Nets, Dots & Underscores) ---
 def process_single_file(uploaded_file):
     content = uploaded_file.getvalue().decode('cp1255', errors='ignore')
     lines = content.splitlines()
@@ -69,13 +69,20 @@ def process_single_file(uploaded_file):
     final_output.append("$End")
     return "\n".join(final_output)
 
-# --- UI LAYOUT ---
+# --- UI LAYOUT & ANIMATION ---
 st.set_page_config(page_title="Mind-Board Converter", layout="wide")
 
 logo_url = "https://raw.githubusercontent.com/yurko120/netlist-converter/main/.devcontainer/MindBoard-Logo.jpg"
 
 st.markdown(f"""
     <style>
+    /* 1. Animation Definition */
+    @keyframes slideInFromTop {{
+        0% {{ transform: translateY(-50px); opacity: 0; }}
+        60% {{ transform: translateY(10px); opacity: 1; }}
+        100% {{ transform: translateY(0); opacity: 1; }}
+    }}
+
     .stApp {{
         background-image: url("{logo_url}");
         background-repeat: no-repeat;
@@ -90,13 +97,18 @@ st.markdown(f"""
         background-color: rgba(255, 255, 255, 0.92); 
         z-index: -1;
     }}
+
+    /* 2. Applying Animation to Title */
     .centered-title {{
         text-align: center;
         color: #000000;
         font-size: 2.8em !important; 
         font-weight: 900 !important; 
         margin-bottom: 20px !important;
+        /* Animation call */
+        animation: slideInFromTop 1.2s ease-out;
     }}
+
     [data-testid="stTextInput"] label {{
         font-size: 1rem !important; 
         font-weight: 700 !important; 
