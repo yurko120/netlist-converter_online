@@ -2,7 +2,7 @@ import streamlit as st
 import io
 import re
 
-# --- CORE LOGIC ---
+# --- CORE LOGIC: Footprint and Netlist Transformation ---
 def process_single_file(uploaded_file):
     content = uploaded_file.getvalue().decode('cp1255', errors='ignore')
     lines = content.splitlines()
@@ -17,6 +17,8 @@ def process_single_file(uploaded_file):
         if not line: continue
             
         upper_line = line.upper()
+        
+        # Section Detection
         if any(k in upper_line for k in ["PART", "PACKAGES", "$PACKAGES"]):
             zone = "START"
             continue
@@ -27,42 +29,37 @@ def process_single_file(uploaded_file):
             zone = None
             continue
 
+        # Processing Footprints Section
         if zone == "START":
-            # טיפול חכם בשורות שבהן חסר ערך (Value)
-            if '!' in line:
-                # אם יש סימני קריאה, נחלץ את מה שביניהם כ-Footprint
-                parts = line.split('!')
-                pkg_id = parts[1].strip() if len(parts) > 1 else ""
-                rest = parts[2].strip() if len(parts) > 2 else ""
+            # Clean separators to make splitting reliable
+            clean_line = line.replace('!', ' ').replace(';', ' ')
+            parts = clean_line.split()
+            
+            if len(parts) >= 2:
+                # Logic: Footprint is usually the first part, Designator is the last.
+                # If there are 3 parts, the middle one is the Value.
+                pkg_id = parts[0]
+                des = parts[-1]
+                val = parts[1] if len(parts) > 2 else ""
                 
-                # ניקוי השארית (Value ו-Designator)
-                rest_parts = rest.replace(';', ' ').split()
-                val = rest_parts[0] if len(rest_parts) > 1 else ""
-                des = rest_parts[-1] if len(rest_parts) > 0 else ""
-            else:
-                # אם אין סימני קריאה, נשתמש בהפרדה לפי רווחים/נקודה-פסיק
-                temp_line = line.replace(';', ' ')
-                parts = temp_line.split()
-                if len(parts) >= 2:
-                    pkg_id = parts[0]
-                    des = parts[-1]
-                    val = parts[1] if len(parts) > 2 else ""
-                else:
+                # Validation: If pkg_id is too short (e.g., U1), it might be a missing footprint
+                # In netlists, footprints are usually longer than designators.
+                if len(pkg_id) < 2:
                     continue
 
-            # ניקוי שם האריזה (Footprint) לפי החוקים החדשים
-            # 1. הסרת סוגריים ותוכנם
-            pkg_id = re.sub(r'\(.*?\)', '', pkg_id)
-            # 2. המרת נקודות ופסיקים לקו תחתון
-            pkg_id = pkg_id.replace('.', '_').replace(',', '_')
-            # 3. המרת אותיות לגדולות
-            pkg_id = pkg_id.upper()
-            
-            # בניית השורה מחדש בצורה תקינה
-            packages.append(f"!{pkg_id}! {val}; {des}")
+                # Footprint Name Sanitization
+                # 1. Remove everything inside parentheses (e.g., GRF(13) -> GRF)
+                pkg_id = re.sub(r'\(.*?\)', '', pkg_id)
+                # 2. Replace illegal characters (dots, commas) with underscores
+                pkg_id = pkg_id.replace('.', '_').replace(',', '_')
+                # 3. Force Uppercase
+                pkg_id = pkg_id.upper()
+                
+                packages.append(f"!{pkg_id}! {val}; {des}")
 
+        # Processing Nets Section
         elif zone == "END":
-            # המרת מקף לנקודה עבור פינים
+            # Convert pin separator '-' to '.'
             processed_line = line.replace('-', '.')
             clean_line = processed_line.replace(',', ' ').replace(';', ' ').replace('*', ' ')
             parts = clean_line.split()
@@ -77,6 +74,7 @@ def process_single_file(uploaded_file):
                 if current_net:
                     nets_data[current_net].extend(parts)
 
+    # Building Final Output
     final_output = ["$PACKAGES"]
     final_output.extend(packages)
     final_output.append("$NETS")
@@ -90,7 +88,7 @@ def process_single_file(uploaded_file):
     final_output.append("$End")
     return "\n".join(final_output)
 
-# --- UI LAYOUT & ANIMATION ---
+# --- UI LAYOUT & STYLING ---
 st.set_page_config(page_title="Mind-Board Converter", layout="wide")
 
 logo_url = "https://raw.githubusercontent.com/yurko120/netlist-converter/main/.devcontainer/MindBoard-Logo.jpg"
