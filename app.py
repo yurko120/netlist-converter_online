@@ -4,63 +4,68 @@ import re
 
 # --- CORE LOGIC: Netlist Transformation ---
 def process_single_file(uploaded_file):
-    # Handling file encoding and cleaning invisible characters
+    # Forced decoding with handling for all types of line breaks
+    raw_bytes = uploaded_file.getvalue()
     try:
-        content = uploaded_file.getvalue().decode('cp1255', errors='ignore')
+        content = raw_bytes.decode('cp1255', errors='ignore')
     except:
-        content = uploaded_file.getvalue().decode('utf-8', errors='ignore')
-    
-    # Standardizing spaces and removing non-breaking spaces
+        content = raw_bytes.decode('utf-8', errors='ignore')
+
+    # STEP 1: Normalize all whitespace and line endings
+    content = content.replace('\r\n', '\n').replace('\r', '\n')
     content = content.replace('\xa0', ' ').replace('\t', ' ')
-    lines = content.splitlines()
     
+    lines = content.split('\n')
     zone = None
     packages = []
     nets_data = {}
     current_net = None
     
-    # Strictly forbidden characters for footprint names
     forbidden_chars = r"[/\\*#@&^%?]"
 
     for line in lines:
+        # We need the leading whitespace info, so we use raw_line for detection
+        # but stripped_line for content extraction
         raw_line = line
-        line_strip = line.strip()
-        if not line_strip: continue
+        stripped_line = line.strip()
         
-        upper_line = line_strip.upper()
-        
-        # Section detection logic
-        if "$PACKAGES" in upper_line or "PART" in upper_line:
+        if not stripped_line:
+            continue
+            
+        upper_line = stripped_line.upper()
+
+        # Section Detection
+        if "$PACKAGES" in upper_line:
             zone = "START"
             continue
-        elif "$NETS" in upper_line or "NET" in upper_line:
+        elif "$NETS" in upper_line:
             zone = "END"
             continue
-        elif line_strip.startswith('$'):
+        elif stripped_line.startswith('$') and zone is not None:
             zone = None
             continue
 
-        # 1. PROCESS PACKAGES (Footprints)
+        # 1. PROCESS PACKAGES
         if zone == "START":
-            clean_pkg = re.sub(r'\(.*?\)', '', line_strip)
-            clean_pkg = re.sub(forbidden_chars, "", clean_pkg)
-            clean_pkg = clean_pkg.replace('!', ' ').replace(';', ' ')
+            # Clean up the package line
+            clean = re.sub(r'\(.*?\)', '', stripped_line)
+            clean = re.sub(forbidden_chars, "", clean)
+            clean = clean.replace('!', ' ').replace(';', ' ')
+            parts = clean.split()
             
-            parts = clean_pkg.split()
             if len(parts) >= 2:
-                # Standard format: !FOOTPRINT! VALUE; DESIGNATOR
                 pkg_id = parts[0].replace('.', '_').replace(',', '_').upper()
                 des = parts[-1]
                 val = parts[1] if len(parts) > 2 else ""
                 packages.append(f"!{pkg_id}! {val}; {des}")
 
-        # 2. PROCESS NETS (Universal Parsing Logic)
+        # 2. PROCESS NETS (State Machine Logic)
         elif zone == "END":
-            # If line starts at the very beginning (no space), it's a new Net name
-            if not raw_line.startswith((' ', '\t')):
-                # Clean line from any existing commas or semicolons
-                clean_line = line_strip.replace(';', ' ').replace(',', ' ')
-                parts = clean_line.split()
+            # If the line starts with NO whitespace, it's a NEW Net
+            if len(raw_line) > 0 and not raw_line[0].isspace():
+                # Clean delimiters and split
+                clean = stripped_line.replace(';', ' ').replace(',', ' ')
+                parts = clean.split()
                 if parts:
                     current_net = parts[0]
                     if current_net not in nets_data:
@@ -69,38 +74,36 @@ def process_single_file(uploaded_file):
                     for p in parts[1:]:
                         nets_data[current_net].append(p.replace('-', '.'))
             
-            # If line starts with a space, it belongs to the previous net
+            # If the line STARTS with whitespace, it's a continuation
             else:
                 if current_net:
-                    clean_line = line_strip.replace(';', ' ').replace(',', ' ')
-                    parts = clean_line.split()
+                    clean = stripped_line.replace(';', ' ').replace(',', ' ')
+                    parts = clean.split()
                     for p in parts:
                         nets_data[current_net].append(p.replace('-', '.'))
 
-    # --- BUILDING OUTPUT ---
-    final_result = ["$PACKAGES"]
-    final_result.extend(packages)
-    final_result.append("$NETS")
+    # --- BUILDING THE FINAL TEXT ---
+    output = ["$PACKAGES"]
+    output.extend(packages)
+    output.append("$NETS")
     
     for net_name, pins in nets_data.items():
-        # Remove duplicates and clean pin strings
-        unique_pins = []
+        # Remove duplicates and empty strings
+        clean_pins = []
         for p in pins:
-            p_clean = p.strip()
-            if p_clean and p_clean not in unique_pins:
-                unique_pins.append(p_clean)
+            p_fixed = p.strip()
+            if p_fixed and p_fixed not in clean_pins:
+                clean_pins.append(p_fixed)
         
-        if unique_pins:
-            # Format: NetName; Pin1 Pin2 Pin3...
-            final_result.append(f"{net_name}; {' '.join(unique_pins)}")
-    
-    final_result.append("$End")
-    return "\n".join(final_result)
+        if clean_pins:
+            output.append(f"{net_name}; {' '.join(clean_pins)}")
+            
+    output.append("$End")
+    return "\n".join(output)
 
 # --- STREAMLIT UI ---
-st.set_page_config(page_title="Netlist Converter Tool", layout="wide")
+st.set_page_config(page_title="Netlist Converter", layout="wide")
 
-# Visual Styling
 logo_url = "https://raw.githubusercontent.com/yurko120/netlist-converter/main/.devcontainer/MindBoard-Logo.jpg"
 st.markdown(f"""
     <style>
@@ -111,37 +114,28 @@ st.markdown(f"""
     }}
     .stApp::before {{
         content: ""; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background-color: rgba(255, 255, 255, 0.92); z-index: -1;
+        background-color: rgba(255, 255, 255, 0.95); z-index: -1;
     }}
-    .main-title {{
-        text-align: center; color: #000000; font-size: 3em !important; font-weight: 900;
-        margin-bottom: 30px;
+    .title-text {{
+        text-align: center; color: black; font-size: 3em; font-weight: bold;
     }}
     </style>
-    <h1 class="main-title">Mind-Board Converter</h1>
+    <h1 class="title-text">Mind-Board Converter</h1>
     """, unsafe_allow_html=True)
 
-uploaded_files = st.file_uploader("Upload Source .NET Files", accept_multiple_files=True)
+files = st.file_uploader("Upload .NET Files", accept_multiple_files=True)
 
-if uploaded_files:
-    for idx, f in enumerate(uploaded_files):
-        st.write(f"--- Processing: {f.name} ---")
+if files:
+    for i, f in enumerate(files):
+        st.subheader(f"File: {f.name}")
         
-        original_name = f.name.rsplit('.', 1)[0]
-        output_name = st.text_input(f"Output name for {f.name}:", 
-                                   value=f"{original_name}_fixed", 
-                                   key=f"name_{idx}")
+        # User defined output name
+        base_name = f.name.rsplit('.', 1)[0]
+        out_name = st.text_input("Save as:", value=f"{base_name}_fixed", key=f"input_{i}")
         
-        transformed_content = process_single_file(f)
+        # Transformation
+        result = process_single_file(f)
         
-        # Action Buttons
-        st.download_button(
-            label=f"Download {output_name}.txt",
-            data=transformed_content,
-            file_name=f"{output_name}.txt",
-            mime="text/plain",
-            key=f"dl_{idx}"
-        )
-        
-        # Technical Preview
-        st.text_area("File Preview", transformed_content, height=400, key=f"preview_{idx}")
+        # Buttons and Preview
+        st.download_button("Download Result", result, file_name=f"{out_name}.txt", key=f"btn_{i}")
+        st.text_area("Live Preview", result, height=300, key=f"area_{i}")
