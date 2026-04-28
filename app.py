@@ -4,12 +4,13 @@ import re
 
 # --- CORE LOGIC: Netlist Transformation ---
 def process_single_file(uploaded_file):
-    # Load content and clean non-breaking spaces (\xa0)
+    # Handling file encoding and cleaning invisible characters
     try:
         content = uploaded_file.getvalue().decode('cp1255', errors='ignore')
     except:
         content = uploaded_file.getvalue().decode('utf-8', errors='ignore')
     
+    # Standardizing spaces and removing non-breaking spaces
     content = content.replace('\xa0', ' ').replace('\t', ' ')
     lines = content.splitlines()
     
@@ -18,6 +19,7 @@ def process_single_file(uploaded_file):
     nets_data = {}
     current_net = None
     
+    # Strictly forbidden characters for footprint names
     forbidden_chars = r"[/\\*#@&^%?]"
 
     for line in lines:
@@ -27,7 +29,7 @@ def process_single_file(uploaded_file):
         
         upper_line = line_strip.upper()
         
-        # Section Detection
+        # Section detection logic
         if "$PACKAGES" in upper_line or "PART" in upper_line:
             zone = "START"
             continue
@@ -38,7 +40,7 @@ def process_single_file(uploaded_file):
             zone = None
             continue
 
-        # 1. PROCESS PACKAGES
+        # 1. PROCESS PACKAGES (Footprints)
         if zone == "START":
             clean_pkg = re.sub(r'\(.*?\)', '', line_strip)
             clean_pkg = re.sub(forbidden_chars, "", clean_pkg)
@@ -46,27 +48,28 @@ def process_single_file(uploaded_file):
             
             parts = clean_pkg.split()
             if len(parts) >= 2:
+                # Standard format: !FOOTPRINT! VALUE; DESIGNATOR
                 pkg_id = parts[0].replace('.', '_').replace(',', '_').upper()
                 des = parts[-1]
                 val = parts[1] if len(parts) > 2 else ""
                 packages.append(f"!{pkg_id}! {val}; {des}")
 
-        # 2. PROCESS NETS (Updated for S0BMDL02_R00.NET format)
+        # 2. PROCESS NETS (Universal Parsing Logic)
         elif zone == "END":
-            # If the line starts with a non-space character, it's a NEW Net
+            # If line starts at the very beginning (no space), it's a new Net name
             if not raw_line.startswith((' ', '\t')):
-                # Split by semicolon or space to get the Net Name
+                # Clean line from any existing commas or semicolons
                 clean_line = line_strip.replace(';', ' ').replace(',', ' ')
                 parts = clean_line.split()
                 if parts:
                     current_net = parts[0]
                     if current_net not in nets_data:
                         nets_data[current_net] = []
-                    # Add any pins found on the same line
+                    # Add remaining pins on the same line
                     for p in parts[1:]:
                         nets_data[current_net].append(p.replace('-', '.'))
             
-            # If the line starts with a space, it's a continuation of the current Net
+            # If line starts with a space, it belongs to the previous net
             else:
                 if current_net:
                     clean_line = line_strip.replace(';', ' ').replace(',', ' ')
@@ -80,11 +83,16 @@ def process_single_file(uploaded_file):
     final_result.append("$NETS")
     
     for net_name, pins in nets_data.items():
-        # Clean pin names and remove empty entries
-        clean_pins = [p.strip() for p in pins if p.strip() and p.strip() != ',']
-        if clean_pins:
-            # Allegro Standard Format: NetName; Pin1 Pin2 Pin3...
-            final_result.append(f"{net_name}; {' '.join(clean_pins)}")
+        # Remove duplicates and clean pin strings
+        unique_pins = []
+        for p in pins:
+            p_clean = p.strip()
+            if p_clean and p_clean not in unique_pins:
+                unique_pins.append(p_clean)
+        
+        if unique_pins:
+            # Format: NetName; Pin1 Pin2 Pin3...
+            final_result.append(f"{net_name}; {' '.join(unique_pins)}")
     
     final_result.append("$End")
     return "\n".join(final_result)
@@ -92,6 +100,7 @@ def process_single_file(uploaded_file):
 # --- STREAMLIT UI ---
 st.set_page_config(page_title="Netlist Converter Tool", layout="wide")
 
+# Visual Styling
 logo_url = "https://raw.githubusercontent.com/yurko120/netlist-converter/main/.devcontainer/MindBoard-Logo.jpg"
 st.markdown(f"""
     <style>
@@ -117,18 +126,22 @@ uploaded_files = st.file_uploader("Upload Source .NET Files", accept_multiple_fi
 if uploaded_files:
     for idx, f in enumerate(uploaded_files):
         st.write(f"--- Processing: {f.name} ---")
+        
         original_name = f.name.rsplit('.', 1)[0]
-        output_filename = st.text_input(f"Output name for {f.name}:", 
-                                       value=f"{original_name}_fixed", 
-                                       key=f"name_{idx}")
+        output_name = st.text_input(f"Output name for {f.name}:", 
+                                   value=f"{original_name}_fixed", 
+                                   key=f"name_{idx}")
         
         transformed_content = process_single_file(f)
         
+        # Action Buttons
         st.download_button(
-            label=f"Download {output_filename}.txt",
+            label=f"Download {output_name}.txt",
             data=transformed_content,
-            file_name=f"{output_filename}.txt",
+            file_name=f"{output_name}.txt",
             mime="text/plain",
             key=f"dl_{idx}"
         )
-        st.text_area("File Preview", transformed_content, height=350, key=f"preview_{idx}")
+        
+        # Technical Preview
+        st.text_area("File Preview", transformed_content, height=400, key=f"preview_{idx}")
