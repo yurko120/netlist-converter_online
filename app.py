@@ -10,32 +10,37 @@ def process_single_file(uploaded_file):
     
     lines = content.splitlines()
     zone = None
-    packages = []
-    nets_data = {}
-    current_net = None
+    final_output = []
     
     forbidden_chars = r"[/\\*#@&^%?]"
 
     for line in lines:
         raw_line = line
         line_strip = line.strip()
-        if not line_strip: continue
+        
+        if not line_strip:
+            final_output.append("")
+            continue
         
         upper_line = line_strip.upper()
         
         # Section Detection
         if any(k in upper_line for k in ["PART", "PACKAGES", "$PACKAGES"]):
             zone = "START"
+            final_output.append("$PACKAGES")
             continue
         elif any(k in upper_line for k in ["$NETS", "NET"]):
             zone = "END"
+            final_output.append("$NETS")
             continue
         elif upper_line.startswith('$'):
             zone = None
+            final_output.append(raw_line)
             continue
 
         # 1. FOOTPRINTS SECTION
         if zone == "START":
+            # Clean parentheses and forbidden chars
             mod_line = re.sub(r'\(.*?\)', '', line_strip)
             mod_line = re.sub(forbidden_chars, "", mod_line)
             mod_line = mod_line.replace('!', ' ').replace(';', ' ')
@@ -44,54 +49,22 @@ def process_single_file(uploaded_file):
                 pkg_id = parts[0].replace('.', '_').replace(',', '_').upper()
                 des = parts[-1]
                 val = parts[1] if len(parts) > 2 else ""
-                if len(pkg_id) >= 2:
-                    packages.append(f"!{pkg_id}! {val}; {des}")
+                final_output.append(f"!{pkg_id}! {val}; {des}")
 
-        # 2. NETS SECTION - Robust State Machine
+        # 2. NETS SECTION - Direct Character Replacement
         elif zone == "END":
-            # If the line DOES NOT start with a space, it's a new Net name
-            if not raw_line.startswith(' '):
-                # Split by semicolon to get the Net Name
-                if ';' in line_strip:
-                    net_part, pins_part = line_strip.split(';', 1)
-                    current_net = net_part.strip()
-                    # Add initial pins from the same line
-                    pins = pins_part.replace('-', '.').replace(',', ' ').split()
-                else:
-                    parts = line_strip.split()
-                    current_net = parts[0]
-                    pins = [p.replace('-', '.') for p in parts[1:]]
-                
-                if current_net:
-                    if current_net not in nets_data:
-                        nets_data[current_net] = []
-                    nets_data[current_net].extend([p for p in pins if p != ';'])
+            # Replace dash with dot ONLY (to preserve names like GND, E, B, H4)
+            mod_line = raw_line.replace('-', '.')
+            # Replace commas with spaces (for multi-line pins)
+            mod_line = mod_line.replace(',', ' ')
+            # Ensure the semicolon has a space after it if it's followed by text
+            mod_line = re.sub(r';(\S)', r'; \1', mod_line)
+            final_output.append(mod_line)
             
-            # If the line STARTS with a space, it's a continuation of the current net
-            else:
-                if current_net:
-                    pins = line_strip.replace('-', '.').replace(',', ' ').split()
-                    nets_data[current_net].extend([p for p in pins if p != ';'])
+        else:
+            final_output.append(raw_line)
 
-    # --- BUILDING OUTPUT ---
-    final_result = ["$PACKAGES"]
-    final_result.extend(packages)
-    final_result.append("$NETS")
-    
-    for net_name, pins in nets_data.items():
-        # Remove duplicates and clean up
-        actual_pins = []
-        for p in pins:
-            p_clean = p.strip().strip(';')
-            if p_clean:
-                actual_pins.append(p_clean)
-        
-        if actual_pins:
-            # Allegro format: NetName; Pin1 Pin2...
-            final_result.append(f"{net_name}; {' '.join(actual_pins)}")
-    
-    final_result.append("$End")
-    return "\n".join(final_result)
+    return "\n".join(final_output)
 
 # --- UI LAYOUT ---
 st.set_page_config(page_title="Mind-Board Converter", layout="wide")
