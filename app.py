@@ -2,75 +2,68 @@ import streamlit as st
 import io
 import re
 
-# --- CORE LOGIC: Footprint and Netlist Transformation ---
-def clean_special_chars(text):
-    """Removes specific illegal characters from Footprint names only."""
-    pattern = r"[/\\*#@&^%?]"
-    return re.sub(pattern, "", text)
-
+# --- CORE LOGIC: Safe Transformation ---
 def process_single_file(uploaded_file):
     content = uploaded_file.getvalue().decode('cp1255', errors='ignore')
     lines = content.splitlines()
     zone = None
-    packages = []
-    nets_output = []
+    final_output = []
+    
+    # Special characters to remove globally: / * \ # @ & ^ % ?
+    chars_to_remove = r"[/\\*#@&^%?]"
 
     for line in lines:
         raw_line = line
-        line_strip = line.strip()
-        if not line_strip: continue
+        strip_line = line.strip()
+        if not strip_line:
+            final_output.append("")
+            continue
             
-        upper_line = line_strip.upper()
+        upper_line = strip_line.upper()
         
         # Section Detection
         if any(k in upper_line for k in ["PART", "PACKAGES", "$PACKAGES"]):
             zone = "START"
+            final_output.append("$PACKAGES")
             continue
         elif any(k in upper_line for k in ["$NETS", "NET"]):
             zone = "END"
+            final_output.append("$NETS")
             continue
         elif upper_line.startswith('$'):
             zone = None
+            final_output.append(raw_line)
             continue
 
-        # 1. FOOTPRINTS SECTION - Intensive Cleaning as requested
+        # 1. FOOTPRINTS SECTION (Packages)
         if zone == "START":
-            # Apply character cleaning only here
-            temp_line = clean_special_chars(line_strip)
-            temp_line = temp_line.replace('!', ' ').replace(';', ' ')
-            parts = temp_line.split()
+            # Remove parentheses and their content
+            mod_line = re.sub(r'\(.*?\)', '', raw_line)
+            # Remove forbidden special characters
+            mod_line = re.sub(chars_to_remove, "", mod_line)
             
-            if len(parts) >= 2:
-                pkg_id = parts[0]
-                des = parts[-1]
-                val = parts[1] if len(parts) > 2 else ""
-                
-                if len(pkg_id) < 2: continue
+            # Handle the Footprint name specifically (between ! or at start)
+            if '!' in mod_line:
+                parts = mod_line.split('!')
+                if len(parts) >= 3:
+                    # Sanitize the footprint part
+                    pkg = parts[1].replace('.', '_').replace(',', '_').upper()
+                    # Reconstruct the line
+                    mod_line = f"!{pkg}!{parts[2]}"
+            
+            final_output.append(mod_line)
 
-                # Clean Parentheses, dots, commas and force Uppercase
-                pkg_id = re.sub(r'\(.*?\)', '', pkg_id)
-                pkg_id = pkg_id.replace('.', '_').replace(',', '_').upper()
-                
-                packages.append(f"!{pkg_id}! {val}; {des}")
-
-        # 2. NETS SECTION - Conservative approach to preserve pin names (E, G, S, H4, GND)
+        # 2. NETS SECTION (Preserve names like GND, E, B, H4)
         elif zone == "END":
-            # We ONLY replace the hyphen with a dot to separate component from pin
-            # We preserve the rest of the line exactly as it is in the source
+            # ONLY replace '-' with '.' to separate component and pin
+            # NO other characters are removed to ensure no data is lost
             mod_line = raw_line.replace('-', '.')
-            # Remove semicolon if it's at the very end of the line
-            if mod_line.endswith(';'):
-                mod_line = mod_line[:-1]
-            nets_output.append(mod_line)
+            final_output.append(mod_line)
+        
+        else:
+            final_output.append(raw_line)
 
-    # Building Final Output
-    final_result = ["$PACKAGES"]
-    final_result.extend(packages)
-    final_result.append("$NETS")
-    final_result.extend(nets_output)
-    final_result.append("$End")
-    
-    return "\n".join(final_result)
+    return "\n".join(final_output)
 
 # --- UI LAYOUT & STYLING ---
 st.set_page_config(page_title="Mind-Board Converter", layout="wide")
