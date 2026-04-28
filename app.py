@@ -8,7 +8,7 @@ def clean_technical_text(text):
         return ""
     
     text = text.upper()
-    # רשימת התווים האסורים כולל סלאש הפוך, פסיק וסולמית
+    # רשימת התווים האסורים: כולל סלאש הפוך, פסיק, סולמית וכו'
     illegal_pattern = r'[#@*+=%^&/ , \\]'
     
     # 1. החלפת כל התווים האסורים במקף תחתון
@@ -64,7 +64,7 @@ def process_single_file(uploaded_file):
             
             if len(parts) >= 2:
                 pkg_raw = parts[0]
-                pkg_id = clean_technical_text(pkg_raw) # ניקוי אגרסיבי לשם האריזה
+                pkg_id = clean_technical_text(pkg_raw) 
                 
                 des = parts[-1]
                 val = parts[1] if len(parts) > 2 else ""
@@ -73,12 +73,10 @@ def process_single_file(uploaded_file):
         # --- 2. טיפול ב-NETS ---
         elif zone == "END":
             if len(raw_line) > 0 and not raw_line[0].isspace():
-                # שורה חדשה של נט
                 clean = stripped_line.replace(';', ' ').replace(',', ' ')
                 parts = clean.split()
                 if parts:
                     net_name_raw = parts[0]
-                    # ניקוי שם הנט לפי אותה לוגיקה
                     current_net = clean_technical_text(net_name_raw)
                     
                     if current_net not in nets_data:
@@ -86,25 +84,34 @@ def process_single_file(uploaded_file):
                     for p in parts[1:]:
                         nets_data[current_net].append(p.replace('-', '.'))
             else:
-                # שורת המשך של נט
                 if current_net:
                     clean = stripped_line.replace(';', ' ').replace(',', ' ')
                     parts = clean.split()
                     for p in parts:
                         nets_data[current_net].append(p.replace('-', '.'))
 
-    # בניית הפלט הסופי
+    # --- בניית הפלט הסופי עם פיצול שורות (10 פינים לשורה) ---
     output = ["$PACKAGES"]
     output.extend(packages)
     output.append("$NETS")
+    
     for net_name, pins in nets_data.items():
         clean_pins = []
         for p in pins:
             p_f = p.strip()
             if p_f and p_f not in clean_pins:
                 clean_pins.append(p_f)
+        
         if clean_pins:
-            output.append(f"{net_name}; {' '.join(clean_pins)}")
+            # פיצול לקבוצות של 10
+            for i in range(0, len(clean_pins), 10):
+                chunk = clean_pins[i:i+10]
+                if i == 0:
+                    # שורה ראשונה עם שם הנט
+                    output.append(f"{net_name}; {' '.join(chunk)}")
+                else:
+                    # שורות המשך (עם רווחים בתחילת השורה)
+                    output.append(f"     {' '.join(chunk)}")
             
     output.append("$End")
     return "\n".join(output)
