@@ -2,71 +2,99 @@ import streamlit as st
 import io
 import re
 
-# --- CORE LOGIC ---
+# --- CORE LOGIC: Netlist Transformation ---
 def process_single_file(uploaded_file):
-    # Standardizing characters and handling non-breaking spaces (\xa0)
+    # Load file and handle non-breaking spaces (\xa0) and tabs
     content = uploaded_file.getvalue().decode('cp1255', errors='ignore')
     content = content.replace('\xa0', ' ').replace('\t', ' ')
     
     lines = content.splitlines()
     zone = None
-    final_output = []
+    packages = []
+    nets_data = {}
+    current_net = None
     
+    # Characters forbidden in footprint names based on requirements
     forbidden_chars = r"[/\\*#@&^%?]"
 
     for line in lines:
         raw_line = line
         line_strip = line.strip()
-        
-        if not line_strip:
-            final_output.append("")
-            continue
+        if not line_strip: continue
         
         upper_line = line_strip.upper()
         
         # Section Detection
         if any(k in upper_line for k in ["PART", "PACKAGES", "$PACKAGES"]):
             zone = "START"
-            final_output.append("$PACKAGES")
             continue
         elif any(k in upper_line for k in ["$NETS", "NET"]):
             zone = "END"
-            final_output.append("$NETS")
             continue
         elif upper_line.startswith('$'):
             zone = None
-            final_output.append(raw_line)
             continue
 
-        # 1. FOOTPRINTS SECTION
+        # 1. PACKAGES SECTION (Footprints)
         if zone == "START":
-            # Clean parentheses and forbidden chars
+            # Sanitize footprint: remove parentheses and forbidden characters
             mod_line = re.sub(r'\(.*?\)', '', line_strip)
             mod_line = re.sub(forbidden_chars, "", mod_line)
             mod_line = mod_line.replace('!', ' ').replace(';', ' ')
             parts = mod_line.split()
+            
             if len(parts) >= 2:
+                # Format: !FOOTPRINT! VALUE; DESIGNATOR
                 pkg_id = parts[0].replace('.', '_').replace(',', '_').upper()
                 des = parts[-1]
                 val = parts[1] if len(parts) > 2 else ""
-                final_output.append(f"!{pkg_id}! {val}; {des}")
+                if len(pkg_id) >= 2:
+                    packages.append(f"!{pkg_id}! {val}; {des}")
 
-        # 2. NETS SECTION - Direct Character Replacement
+        # 2. NETS SECTION (Connections)
         elif zone == "END":
-            # Replace dash with dot ONLY (to preserve names like GND, E, B, H4)
-            mod_line = raw_line.replace('-', '.')
-            # Replace commas with spaces (for multi-line pins)
-            mod_line = mod_line.replace(',', ' ')
-            # Ensure the semicolon has a space after it if it's followed by text
-            mod_line = re.sub(r';(\S)', r'; \1', mod_line)
-            final_output.append(mod_line)
+            # If the line DOES NOT start with a space, it's a new Net name
+            if not raw_line.startswith((' ', '\t')):
+                # Clean delimiters to isolate the Net Name
+                clean_line = line_strip.replace(',', ' ').replace(';', ' ')
+                parts = clean_line.split()
+                if parts:
+                    current_net = parts[0]
+                    if current_net not in nets_data:
+                        nets_data[current_net] = []
+                    # Add pins from the same line (if any), replacing - with .
+                    for p in parts[1:]:
+                        nets_data[current_net].append(p.replace('-', '.'))
             
-        else:
-            final_output.append(raw_line)
+            # If the line STARTS with a space, it's a continuation of the previous net
+            else:
+                if current_net:
+                    clean_line = line_strip.replace(',', ' ').replace(';', ' ')
+                    parts = clean_line.split()
+                    for p in parts:
+                        nets_data[current_net].append(p.replace('-', '.'))
 
-    return "\n".join(final_output)
+    # --- BUILDING OUTPUT ---
+    final_result = ["$PACKAGES"]
+    final_result.extend(packages)
+    final_result.append("$NETS")
+    
+    for net_name, pins in nets_data.items():
+        # Remove empty strings and stray semicolons
+        actual_pins = []
+        for p in pins:
+            p_clean = p.strip()
+            if p_clean and p_clean != ';':
+                actual_pins.append(p_clean)
+        
+        if actual_pins:
+            # Allegro Standard Format: NetName; Pin1 Pin2 Pin3...
+            final_result.append(f"{net_name}; {' '.join(actual_pins)}")
+    
+    final_result.append("$End")
+    return "\n".join(final_result)
 
-# --- UI LAYOUT ---
+# --- STREAMLIT UI ---
 st.set_page_config(page_title="Mind-Board Converter", layout="wide")
 logo_url = "https://raw.githubusercontent.com/yurko120/netlist-converter/main/.devcontainer/MindBoard-Logo.jpg"
 
@@ -110,15 +138,4 @@ if uploaded_files:
                 custom_name = st.text_input("Enter Output Name:", value=f"{original_name}_transformed", key=f"name_input_{idx}")
                 content = process_single_file(f)
                 processed_files_data.append({"display_name": custom_name, "content": content})
-                full_filename = custom_name if custom_name.endswith(('.txt', '.net')) else f"{custom_name}.txt"
-                st.download_button(label=f"📥 Download {full_filename}", data=content, file_name=full_filename, mime="text/plain", key=f"dl_btn_{idx}", use_container_width=True)
-                st.markdown("<br>", unsafe_allow_html=True)
-
-    st.divider()
-    st.subheader("🔍 Technical Preview")
-    tab_titles = [item["display_name"] for item in processed_files_data]
-    if tab_titles:
-        tabs = st.tabs(tab_titles)
-        for idx, tab in enumerate(tabs):
-            with tab:
-                st.text_area(f"Preview: {processed_files_data[idx]['display_name']}", value=processed_files_data[idx]['content'], height=450, key=f"preview_text_{idx}")
+                full_filename
