@@ -2,22 +2,22 @@ import streamlit as st
 import io
 import re
 
-# --- CORE LOGIC: Unified Strict Cleaning ---
+# --- CORE LOGIC: Strict Technical Cleaning ---
 def clean_technical_text(text):
     if not text:
         return ""
     
     text = text.upper()
-    # רשימת התווים האסורים: כולל סלאש הפוך, פסיק, סולמית וכו'
+    # תווים אסורים: סולמית, שטרודל, כוכבית, פלוס, שווה, אחוז, חזקה, אמפרסנד, סלאשים, פסיק ורווח
     illegal_pattern = r'[#@*+=%^&/ , \\]'
     
-    # 1. החלפת כל התווים האסורים במקף תחתון
+    # 1. החלפת כל תו אסור במקף תחתון
     cleaned = re.sub(illegal_pattern, '_', text)
     
-    # 2. הסרת מקפים תחתונים מסוף המחרוזת (מטפל בסימנים שהיו בסוף)
+    # 2. הסרת מקפים תחתונים מסוף השם (מטפל בסימנים שהיו בסוף המילה)
     cleaned = cleaned.rstrip('_')
     
-    # 3. איחוד מקפים תחתונים כפולים
+    # 3. מניעת כפילות של מקפים תחתונים
     cleaned = re.sub(r'_+', '_', cleaned)
     
     return cleaned
@@ -39,7 +39,6 @@ def process_single_file(uploaded_file):
     current_net = None
     
     for line in lines:
-        raw_line = line
         stripped_line = line.strip()
         if not stripped_line:
             continue
@@ -56,61 +55,66 @@ def process_single_file(uploaded_file):
             zone = None
             continue
 
-        # --- 1. טיפול ב-PACKAGES ---
+        # --- 1. עיבוד PACKAGES ---
         if zone == "START":
+            # הסרת תוכן בסוגריים
             clean_step = re.sub(r'\(.*?\)', '', stripped_line)
             clean_step = clean_step.replace('!', ' ').replace(';', ' ')
             parts = clean_step.split()
             
             if len(parts) >= 2:
                 pkg_raw = parts[0]
-                pkg_id = clean_technical_text(pkg_raw) 
+                pkg_id = clean_technical_text(pkg_raw) # ניקוי שם האריזה
                 
                 des = parts[-1]
                 val = parts[1] if len(parts) > 2 else ""
                 packages.append(f"!{pkg_id}! {val}; {des}")
 
-        # --- 2. טיפול ב-NETS ---
+        # --- 2. עיבוד NETS (איסוף פינים) ---
         elif zone == "END":
-            if len(raw_line) > 0 and not raw_line[0].isspace():
+            # אם השורה לא מתחילה ברווח - זה שם נט חדש
+            if not line.startswith((' ', '\t')):
                 clean = stripped_line.replace(';', ' ').replace(',', ' ')
                 parts = clean.split()
                 if parts:
                     net_name_raw = parts[0]
-                    current_net = clean_technical_text(net_name_raw)
+                    current_net = clean_technical_text(net_name_raw) # ניקוי שם הנט
                     
                     if current_net not in nets_data:
                         nets_data[current_net] = []
+                    # הוספת הפינים שבאותה שורה
                     for p in parts[1:]:
                         nets_data[current_net].append(p.replace('-', '.'))
             else:
+                # שורת המשך (פינים בלבד)
                 if current_net:
                     clean = stripped_line.replace(';', ' ').replace(',', ' ')
                     parts = clean.split()
                     for p in parts:
                         nets_data[current_net].append(p.replace('-', '.'))
 
-    # --- בניית הפלט הסופי עם פיצול שורות (10 פינים לשורה) ---
+    # --- 3. בניית הפלט עם פיצול לשורות (עד 10 פינים לשורה) ---
     output = ["$PACKAGES"]
     output.extend(packages)
     output.append("$NETS")
     
     for net_name, pins in nets_data.items():
-        clean_pins = []
+        # הסרת כפילויות ופינים ריקים
+        unique_pins = []
         for p in pins:
             p_f = p.strip()
-            if p_f and p_f not in clean_pins:
-                clean_pins.append(p_f)
+            if p_f and p_f not in unique_pins:
+                unique_pins.append(p_f)
         
-        if clean_pins:
-            # פיצול לקבוצות של 10
-            for i in range(0, len(clean_pins), 10):
-                chunk = clean_pins[i:i+10]
+        if unique_pins:
+            # פיצול הרשימה לקבוצות של 10
+            for i in range(0, len(unique_pins), 10):
+                chunk = unique_pins[i:i+10]
                 if i == 0:
-                    # שורה ראשונה עם שם הנט
+                    # שורה ראשונה: שם הנט וסמיקולון
                     output.append(f"{net_name}; {' '.join(chunk)}")
                 else:
-                    # שורות המשך (עם רווחים בתחילת השורה)
+                    # שורות המשך: הזחה של 5 רווחים
                     output.append(f"     {' '.join(chunk)}")
             
     output.append("$End")
