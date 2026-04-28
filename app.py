@@ -2,7 +2,7 @@ import streamlit as st
 import io
 import re
 
-# --- CORE LOGIC: Netlist Transformation (Ensuring no missing data) ---
+# --- CORE LOGIC: Netlist Transformation (Strict Character Cleaning) ---
 def process_single_file(uploaded_file):
     raw_bytes = uploaded_file.getvalue()
     try:
@@ -20,8 +20,6 @@ def process_single_file(uploaded_file):
     nets_data = {}
     current_net = None
     
-    forbidden_chars = r"[/\\*#@&^%?]"
-
     for line in lines:
         raw_line = line
         stripped_line = line.strip()
@@ -40,14 +38,24 @@ def process_single_file(uploaded_file):
             zone = None
             continue
 
-        # 1. PROCESS PACKAGES
+        # 1. PROCESS PACKAGES (Total Ban on Special Characters)
         if zone == "START":
-            clean = re.sub(r'\(.*?\)', '', stripped_line)
-            clean = re.sub(forbidden_chars, "", clean)
-            clean = clean.replace('!', ' ').replace(';', ' ')
-            parts = clean.split()
+            # Step A: Remove everything inside parentheses
+            clean_step = re.sub(r'\(.*?\)', '', stripped_line)
+            # Step B: Standardize separators
+            clean_step = clean_step.replace('!', ' ').replace(';', ' ')
+            parts = clean_step.split()
+            
             if len(parts) >= 2:
-                pkg_id = parts[0].replace('.', '_').replace(',', '_').upper()
+                pkg_raw = parts[0].upper()
+                
+                # --- CRITICAL FIX: Replace ALL non-alphanumeric chars with "_" ---
+                # This covers #, @, /, *, +, =, %, ^, &, etc.
+                pkg_id = re.sub(r'[^A-Z0-9]', '_', pkg_raw)
+                
+                # Clean up repeated underscores and leading/trailing ones
+                pkg_id = re.sub(r'_+', '_', pkg_id).strip('_')
+                
                 des = parts[-1]
                 val = parts[1] if len(parts) > 2 else ""
                 packages.append(f"!{pkg_id}! {val}; {des}")
@@ -70,24 +78,24 @@ def process_single_file(uploaded_file):
                     for p in parts:
                         nets_data[current_net].append(p.replace('-', '.'))
 
+    # Building Output
     output = ["$PACKAGES"]
     output.extend(packages)
     output.append("$NETS")
     for net_name, pins in nets_data.items():
         clean_pins = []
         for p in pins:
-            p_fixed = p.strip()
-            if p_fixed and p_fixed not in clean_pins:
-                clean_pins.append(p_fixed)
+            p_f = p.strip()
+            if p_f and p_f not in clean_pins:
+                clean_pins.append(p_f)
         if clean_pins:
             output.append(f"{net_name}; {' '.join(clean_pins)}")
             
     output.append("$End")
     return "\n".join(output)
 
-# --- STREAMLIT UI: Full Visual Style & Animation ---
+# --- STREAMLIT UI: Animated & Sharper Visuals ---
 st.set_page_config(page_title="Mind-Board Converter", layout="wide")
-
 logo_url = "https://raw.githubusercontent.com/yurko120/netlist-converter/main/.devcontainer/MindBoard-Logo.jpg"
 
 st.markdown(f"""
@@ -96,7 +104,6 @@ st.markdown(f"""
         0% {{ opacity: 0; transform: translateY(-20px); }}
         100% {{ opacity: 1; transform: translateY(0); }}
     }}
-    
     .stApp {{
         background-image: url("{logo_url}");
         background-repeat: no-repeat; background-attachment: fixed;
@@ -110,7 +117,6 @@ st.markdown(f"""
         text-align: center; color: #000000; font-size: 3.5em !important; 
         font-weight: 900 !important; margin-bottom: 30px !important;
         animation: fadeInDown 1s ease-out;
-        text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
     }}
     .bold-header {{
         font-weight: 900 !important; color: #000000 !important;
@@ -119,26 +125,22 @@ st.markdown(f"""
     .stTextArea textarea {{
         background-color: rgba(255, 255, 255, 0.8) !important; 
         border: 2px solid #000000 !important;
-        font-family: 'Courier New', monospace; 
-        font-weight: 700 !important;
-        color: #000000 !important;
+        font-family: 'Courier New', monospace; font-weight: 700 !important;
     }}
     p, span, label, .stMarkdown {{
-        font-weight: 700 !important;
-        color: #000000 !important;
+        font-weight: 700 !important; color: #000000 !important;
     }}
     </style>
     <h1 class="centered-title">Mind-Board Converter</h1>
     """, unsafe_allow_html=True)
 
 col1, col2 = st.columns(2)
-
 with col1:
     st.markdown('<p class="bold-header">1. Upload Source Files</p>', unsafe_allow_html=True)
     uploaded_files = st.file_uploader("Upload .NET files", accept_multiple_files=True, label_visibility="collapsed")
 
 if uploaded_files:
-    processed_files_data = []
+    results = []
     with col2:
         st.markdown('<p class="bold-header">2. File Settings & Download</p>', unsafe_allow_html=True)
         for idx, f in enumerate(uploaded_files):
@@ -146,36 +148,17 @@ if uploaded_files:
                 st.markdown(f"**Target:** `{f.name}`")
                 original_name = f.name.rsplit('.', 1)[0]
                 default_name = f"{original_name}_fixed"
-                
-                custom_name = st.text_input("New Output Name:", 
-                                            value=default_name, 
-                                            key=f"name_input_{idx}")
-                
-                full_filename = f"{custom_name}.txt" if not custom_name.endswith(('.txt', '.net')) else custom_name
-                
+                custom_name = st.text_input("New Output Name:", value=default_name, key=f"n_{idx}")
+                full_name = f"{custom_name}.txt" if not custom_name.endswith(('.txt', '.net')) else custom_name
                 content = process_single_file(f)
-                processed_files_data.append({"display_name": full_filename, "content": content})
-                
-                st.download_button(
-                    label=f"📥 Download {full_filename}", 
-                    data=content, 
-                    file_name=full_filename, 
-                    mime="text/plain", 
-                    key=f"dl_btn_{idx}", 
-                    use_container_width=True
-                )
+                results.append({"name": full_name, "content": content})
+                st.download_button(label=f"📥 Download {full_name}", data=content, file_name=full_name, mime="text/plain", key=f"b_{idx}", use_container_width=True)
                 st.markdown("<br>", unsafe_allow_html=True)
 
     st.divider()
-    # תיקון המיקום: הכותרת מיושרת לשמאל (text-align: left)
-    st.markdown('<h2 style="text-align:left; font-weight:900; margin-left: 0px;">🔍 Technical Preview</h2>', unsafe_allow_html=True)
-    
-    tab_titles = [item["display_name"] for item in processed_files_data]
-    if tab_titles:
-        tabs = st.tabs(tab_titles)
+    st.markdown('<h2 style="text-align:left; font-weight:900;">🔍 Technical Preview</h2>', unsafe_allow_html=True)
+    if results:
+        tabs = st.tabs([r["name"] for r in results])
         for idx, tab in enumerate(tabs):
             with tab:
-                st.text_area(f"Data Preview:", 
-                             value=processed_files_data[idx]["content"], 
-                             height=500, 
-                             key=f"preview_text_{idx}")
+                st.text_area("Data Content:", value=results[idx]["content"], height=500, key=f"t_{idx}")
