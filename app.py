@@ -2,10 +2,9 @@ import streamlit as st
 import io
 import re
 
-# --- CORE LOGIC: Footprint and Netlist Transformation ---
+# --- CORE LOGIC ---
 def clean_special_chars(text):
-    """Removes specific illegal characters from the given text."""
-    # List of characters to remove: / * \ # @ & ^ % ?
+    """Only used for Footprint names to remove / * \ # @ & ^ % ?"""
     pattern = r"[/\\*#@&^%?]"
     return re.sub(pattern, "", text)
 
@@ -14,15 +13,16 @@ def process_single_file(uploaded_file):
     lines = content.splitlines()
     zone = None
     packages = []
-    nets_data = {}
-    current_net = None
-
+    
+    # We will store Nets as a simple list of strings to avoid logic errors
+    nets_output = []
+    
     for line in lines:
-        raw_line = line 
-        line = line.strip()
-        if not line: continue
+        raw_line = line
+        line_strip = line.strip()
+        if not line_strip: continue
             
-        upper_line = line.upper()
+        upper_line = line_strip.upper()
         
         # Section Detection
         if any(k in upper_line for k in ["PART", "PACKAGES", "$PACKAGES"]):
@@ -35,11 +35,11 @@ def process_single_file(uploaded_file):
             zone = None
             continue
 
-        # Processing Footprints Section
+        # 1. FOOTPRINTS SECTION - Intensive Cleaning
         if zone == "START":
-            # Apply global character cleaning to the line
-            line = clean_special_chars(line)
-            clean_line = line.replace('!', ' ').replace(';', ' ')
+            # Remove special characters from the whole line first
+            clean_line = clean_special_chars(line_strip)
+            clean_line = clean_line.replace('!', ' ').replace(';', ' ')
             parts = clean_line.split()
             
             if len(parts) >= 2:
@@ -47,53 +47,33 @@ def process_single_file(uploaded_file):
                 des = parts[-1]
                 val = parts[1] if len(parts) > 2 else ""
                 
-                if len(pkg_id) < 2:
-                    continue
+                if len(pkg_id) < 2: continue
 
-                # Specific Footprint Sanitization
-                pkg_id = re.sub(r'\(.*?\)', '', pkg_id) # Remove parentheses
-                pkg_id = pkg_id.replace('.', '_').replace(',', '_') # Replace dots/commas
-                pkg_id = pkg_id.upper() # Force Uppercase
+                # Clean Parentheses and format
+                pkg_id = re.sub(r'\(.*?\)', '', pkg_id)
+                pkg_id = pkg_id.replace('.', '_').replace(',', '_').upper()
                 
                 packages.append(f"!{pkg_id}! {val}; {des}")
 
-        # Processing Nets Section
+        # 2. NETS SECTION - Minimal Touch (Preserving Names like GND, E, B)
         elif zone == "END":
-            # IMPORTANT: We DO NOT apply clean_special_chars here to preserve pin names like GND, E, B, etc.
-            # Convert pin separator '-' to '.' (e.g., U1-E -> U1.E)
-            processed_line = line.replace('-', '.')
-            # Only clean separators used for structure, keeping the pin names intact
-            clean_line = processed_line.replace(',', ' ').replace(';', ' ')
-            parts = clean_line.split()
-            if not parts: continue
-            
-            # If the line doesn't start with space/tab, it's a new Net name
-            if not raw_line.startswith((' ', '\t')):
-                current_net = parts[0]
-                if current_net not in nets_data:
-                    nets_data[current_net] = []
-                nets_data[current_net].extend(parts[1:])
-            else:
-                # If it starts with space/tab, these are pins belonging to the current_net
-                if current_net:
-                    nets_data[current_net].extend(parts)
+            # We ONLY replace '-' with '.' and leave everything else exactly as is
+            # This ensures no alphanumeric pin names (E, B, GND) are lost.
+            mod_line = raw_line.replace('-', '.')
+            # Remove ONLY the semicolon at the end if exists
+            mod_line = mod_line.replace(';', '')
+            nets_output.append(mod_line)
 
     # Building Final Output
-    final_output = ["$PACKAGES"]
-    final_output.extend(packages)
-    final_output.append("$NETS")
-    for net_name, pins in nets_data.items():
-        # Filtering out empty strings and semicolons, but KEEPING names like GND, E, B
-        actual_pins = [p.strip() for p in pins if p.strip() and p.strip() != ';']
-        if not actual_pins: continue
-        for i in range(0, len(actual_pins), 10):
-            chunk = actual_pins[i:i+10]
-            final_output.append(f"{net_name}; {' '.join(chunk)}")
+    final_result = ["$PACKAGES"]
+    final_result.extend(packages)
+    final_result.append("$NETS")
+    final_result.extend(nets_output)
+    final_result.append("$End")
     
-    final_output.append("$End")
-    return "\n".join(final_output)
+    return "\n".join(final_result)
 
-# --- UI LAYOUT & STYLING ---
+# --- UI LAYOUT ---
 st.set_page_config(page_title="Mind-Board Converter", layout="wide")
 
 logo_url = "https://raw.githubusercontent.com/yurko120/netlist-converter/main/.devcontainer/MindBoard-Logo.jpg"
@@ -168,7 +148,7 @@ if uploaded_files:
                 st.markdown("<br>", unsafe_allow_html=True)
 
     st.divider()
-    st.subheader("🔍 Technical Preview (Per File)")
+    st.subheader("🔍 Technical Preview")
     tab_titles = [item["display_name"] for item in processed_files_data]
     if tab_titles:
         tabs = st.tabs(tab_titles)
