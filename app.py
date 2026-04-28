@@ -5,7 +5,11 @@ import re
 # --- CORE LOGIC: Netlist Transformation ---
 def process_single_file(uploaded_file):
     # Load file and handle non-breaking spaces (\xa0) and tabs
-    content = uploaded_file.getvalue().decode('cp1255', errors='ignore')
+    try:
+        content = uploaded_file.getvalue().decode('cp1255', errors='ignore')
+    except Exception:
+        content = uploaded_file.getvalue().decode('utf-8', errors='ignore')
+        
     content = content.replace('\xa0', ' ').replace('\t', ' ')
     
     lines = content.splitlines()
@@ -14,7 +18,7 @@ def process_single_file(uploaded_file):
     nets_data = {}
     current_net = None
     
-    # Characters forbidden in footprint names based on requirements
+    # Characters forbidden in footprint names
     forbidden_chars = r"[/\\*#@&^%?]"
 
     for line in lines:
@@ -53,20 +57,19 @@ def process_single_file(uploaded_file):
 
         # 2. NETS SECTION (Connections)
         elif zone == "END":
-            # If the line DOES NOT start with a space, it's a new Net name
+            # If line doesn't start with space, it's a new Net name
             if not raw_line.startswith((' ', '\t')):
-                # Clean delimiters to isolate the Net Name
                 clean_line = line_strip.replace(',', ' ').replace(';', ' ')
                 parts = clean_line.split()
                 if parts:
                     current_net = parts[0]
                     if current_net not in nets_data:
                         nets_data[current_net] = []
-                    # Add pins from the same line (if any), replacing - with .
+                    # Add pins from the same line, replacing - with .
                     for p in parts[1:]:
                         nets_data[current_net].append(p.replace('-', '.'))
             
-            # If the line STARTS with a space, it's a continuation of the previous net
+            # If line starts with space, it's a continuation
             else:
                 if current_net:
                     clean_line = line_strip.replace(',', ' ').replace(';', ' ')
@@ -80,15 +83,14 @@ def process_single_file(uploaded_file):
     final_result.append("$NETS")
     
     for net_name, pins in nets_data.items():
-        # Remove empty strings and stray semicolons
         actual_pins = []
         for p in pins:
-            p_clean = p.strip()
-            if p_clean and p_clean != ';':
+            p_clean = p.strip().strip(';')
+            if p_clean:
                 actual_pins.append(p_clean)
         
         if actual_pins:
-            # Allegro Standard Format: NetName; Pin1 Pin2 Pin3...
+            # Standard Format: NetName; Pin1 Pin2...
             final_result.append(f"{net_name}; {' '.join(actual_pins)}")
     
     final_result.append("$End")
@@ -134,8 +136,42 @@ if uploaded_files:
         for idx, f in enumerate(uploaded_files):
             with st.container():
                 st.markdown(f"**Original File:** `{f.name}`")
+                
+                # Logic for filename generation
                 original_name = f.name.rsplit('.', 1)[0]
-                custom_name = st.text_input("Enter Output Name:", value=f"{original_name}_transformed", key=f"name_input_{idx}")
+                default_name = f"{original_name}_transformed"
+                
+                custom_name = st.text_input("Enter Output Name:", 
+                                            value=default_name, 
+                                            key=f"name_input_{idx}")
+                
+                # Ensure filename has an extension
+                if not custom_name.endswith(('.txt', '.net')):
+                    full_filename = f"{custom_name}.txt"
+                else:
+                    full_filename = custom_name
+                
                 content = process_single_file(f)
-                processed_files_data.append({"display_name": custom_name, "content": content})
-                full_filename
+                processed_files_data.append({"display_name": full_filename, "content": content})
+                
+                st.download_button(
+                    label=f"Download {full_filename}", 
+                    data=content, 
+                    file_name=full_filename, 
+                    mime="text/plain", 
+                    key=f"dl_btn_{idx}", 
+                    use_container_width=True
+                )
+                st.markdown("<br>", unsafe_allow_html=True)
+
+    st.divider()
+    st.subheader("🔍 Technical Preview")
+    tab_titles = [item["display_name"] for item in processed_files_data]
+    if tab_titles:
+        tabs = st.tabs(tab_titles)
+        for idx, tab in enumerate(tabs):
+            with tab:
+                st.text_area(f"Preview: {processed_files_data[idx]['display_name']}", 
+                             value=processed_files_data[idx]['content'], 
+                             height=450, 
+                             key=f"preview_text_{idx}")
