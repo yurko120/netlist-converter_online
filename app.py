@@ -2,9 +2,9 @@ import streamlit as st
 import io
 import re
 
-# --- CORE LOGIC ---
+# --- CORE LOGIC: Footprint and Netlist Transformation ---
 def clean_special_chars(text):
-    """Only used for Footprint names to remove / * \ # @ & ^ % ?"""
+    """Removes specific illegal characters from Footprint names only."""
     pattern = r"[/\\*#@&^%?]"
     return re.sub(pattern, "", text)
 
@@ -13,10 +13,8 @@ def process_single_file(uploaded_file):
     lines = content.splitlines()
     zone = None
     packages = []
-    
-    # We will store Nets as a simple list of strings to avoid logic errors
     nets_output = []
-    
+
     for line in lines:
         raw_line = line
         line_strip = line.strip()
@@ -35,12 +33,12 @@ def process_single_file(uploaded_file):
             zone = None
             continue
 
-        # 1. FOOTPRINTS SECTION - Intensive Cleaning
+        # 1. FOOTPRINTS SECTION - Intensive Cleaning as requested
         if zone == "START":
-            # Remove special characters from the whole line first
-            clean_line = clean_special_chars(line_strip)
-            clean_line = clean_line.replace('!', ' ').replace(';', ' ')
-            parts = clean_line.split()
+            # Apply character cleaning only here
+            temp_line = clean_special_chars(line_strip)
+            temp_line = temp_line.replace('!', ' ').replace(';', ' ')
+            parts = temp_line.split()
             
             if len(parts) >= 2:
                 pkg_id = parts[0]
@@ -49,19 +47,20 @@ def process_single_file(uploaded_file):
                 
                 if len(pkg_id) < 2: continue
 
-                # Clean Parentheses and format
+                # Clean Parentheses, dots, commas and force Uppercase
                 pkg_id = re.sub(r'\(.*?\)', '', pkg_id)
                 pkg_id = pkg_id.replace('.', '_').replace(',', '_').upper()
                 
                 packages.append(f"!{pkg_id}! {val}; {des}")
 
-        # 2. NETS SECTION - Minimal Touch (Preserving Names like GND, E, B)
+        # 2. NETS SECTION - Conservative approach to preserve pin names (E, G, S, H4, GND)
         elif zone == "END":
-            # We ONLY replace '-' with '.' and leave everything else exactly as is
-            # This ensures no alphanumeric pin names (E, B, GND) are lost.
+            # We ONLY replace the hyphen with a dot to separate component from pin
+            # We preserve the rest of the line exactly as it is in the source
             mod_line = raw_line.replace('-', '.')
-            # Remove ONLY the semicolon at the end if exists
-            mod_line = mod_line.replace(';', '')
+            # Remove semicolon if it's at the very end of the line
+            if mod_line.endswith(';'):
+                mod_line = mod_line[:-1]
             nets_output.append(mod_line)
 
     # Building Final Output
@@ -73,7 +72,7 @@ def process_single_file(uploaded_file):
     
     return "\n".join(final_result)
 
-# --- UI LAYOUT ---
+# --- UI LAYOUT & STYLING ---
 st.set_page_config(page_title="Mind-Board Converter", layout="wide")
 
 logo_url = "https://raw.githubusercontent.com/yurko120/netlist-converter/main/.devcontainer/MindBoard-Logo.jpg"
