@@ -2,29 +2,25 @@ import streamlit as st
 import io
 import re
 
-# --- CORE LOGIC ---
 def process_single_file(uploaded_file):
-    # Standardizing spaces and encoding to handle non-breaking spaces (\xa0)
+    # Standardizing characters and handling non-breaking spaces (\xa0)
     content = uploaded_file.getvalue().decode('cp1255', errors='ignore')
     content = content.replace('\xa0', ' ').replace('\t', ' ')
     
     lines = content.splitlines()
     zone = None
     packages = []
-    nets_data = {}
-    current_net = None
+    # Using a list to maintain order and handle multi-line connections
+    nets_raw = []
     
-    # Forbidden chars for footprints: / * \ # @ & ^ % ?
-    chars_to_remove = r"[/\\*#@&^%?]"
+    forbidden_chars = r"[/\\*#@&^%?]"
 
     for line in lines:
-        raw_line = line
         line_strip = line.strip()
         if not line_strip: continue
-            
         upper_line = line_strip.upper()
         
-        # 1. Section Detection
+        # Section Detection
         if any(k in upper_line for k in ["PART", "PACKAGES", "$PACKAGES"]):
             zone = "START"
             continue
@@ -35,11 +31,11 @@ def process_single_file(uploaded_file):
             zone = None
             continue
 
-        # 2. FOOTPRINTS SECTION
+        # 1. FOOTPRINTS SECTION (Packages)
         if zone == "START":
-            # Sanitize footprint name: remove parentheses and forbidden chars
+            # Sanitize footprint: remove parentheses and forbidden characters
             mod_line = re.sub(r'\(.*?\)', '', line_strip)
-            mod_line = re.sub(chars_to_remove, "", mod_line)
+            mod_line = re.sub(forbidden_chars, "", mod_line)
             mod_line = mod_line.replace('!', ' ').replace(';', ' ')
             parts = mod_line.split()
             
@@ -50,50 +46,40 @@ def process_single_file(uploaded_file):
                 if len(pkg_id) >= 2:
                     packages.append(f"!{pkg_id}! {val}; {des}")
 
-        # 3. NETS SECTION - Reconstruction logic
+        # 2. NETS SECTION (Connections)
         elif zone == "END":
-            # Replace dash with dot for pins and clean special separators
-            clean_line = line_strip.replace('-', '.')
-            
-            # If line doesn't start with space/tab, it's a Net declaration
-            if not raw_line.startswith((' ', '\t')):
-                # Split by semicolon to isolate Net Name
-                if ';' in clean_line:
-                    net_part, pin_part = clean_line.split(';', 1)
-                    current_net = net_part.strip()
-                    pins = pin_part.replace(',', ' ').split()
-                else:
-                    parts = clean_line.split()
-                    current_net = parts[0]
-                    pins = parts[1:]
-                
-                if current_net:
-                    if current_net not in nets_data:
-                        nets_data[current_net] = []
-                    nets_data[current_net].extend([p for p in pins if p.strip()])
-            else:
-                # Indented line - continuation of previous net
-                if current_net:
-                    pins = clean_line.replace(',', ' ').split()
-                    nets_data[current_net].extend([p for p in pins if p.strip()])
+            # Store the raw lines to process them as a single stream
+            nets_raw.append(line)
 
-    # --- BUILDING OUTPUT ---
+    # Reconstructing Nets properly
+    full_nets_text = "\n".join(nets_raw)
+    # Split by the start of a new Net (assuming Net names start at line beginning)
+    # or handle the semicolon format explicitly
+    net_entries = []
+    
+    # Using regex to find "NetName;" and everything until the next Net name or end of section
+    raw_entries = re.findall(r'^(\S+?);(.*?)(?=\n\S+?;|\Z)', full_nets_text, re.DOTALL | re.MULTILINE)
+    
+    reconstructed_nets = []
+    for net_name, pin_text in raw_entries:
+        # Clean net name and pin text
+        clean_net = net_name.strip()
+        # Replace dash with dot in pins, remove commas and split into individual pins
+        clean_pins = pin_text.replace('-', '.').replace(',', ' ').split()
+        
+        if clean_net and clean_pins:
+            reconstructed_nets.append(f"{clean_net}; {' '.join(clean_pins)}")
+
+    # Building Final Output
     final_result = ["$PACKAGES"]
     final_result.extend(packages)
     final_result.append("$NETS")
-    
-    for net_name, pins in nets_data.items():
-        # Filtering empty strings and stray semicolons
-        actual_pins = [p.strip() for p in pins if p.strip() and p.strip() != ';']
-        if not actual_pins: continue
-        
-        # Format: NetName; Pin1 Pin2... (Standard Allegro format)
-        final_result.append(f"{net_name}; {' '.join(actual_pins)}")
-    
+    final_result.extend(reconstructed_nets)
     final_result.append("$End")
+    
     return "\n".join(final_result)
 
-# --- UI LAYOUT & STYLING ---
+# --- UI LAYOUT ---
 st.set_page_config(page_title="Mind-Board Converter", layout="wide")
 logo_url = "https://raw.githubusercontent.com/yurko120/netlist-converter/main/.devcontainer/MindBoard-Logo.jpg"
 
