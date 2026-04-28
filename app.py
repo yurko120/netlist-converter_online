@@ -2,28 +2,23 @@ import streamlit as st
 import io
 import re
 
-# --- CORE LOGIC: Strict Package Name Cleaning ---
-def clean_package_name(name):
-    if not name:
+# --- CORE LOGIC: Unified Strict Cleaning ---
+def clean_technical_text(text):
+    if not text:
         return ""
     
-    # List of absolutely forbidden characters based on your feedback
-    # Including #, @, *, +, =, %, ^, &, /, and comma (,)
-    illegal_chars_regex = r"[#@*+=%^&/ ,]"
+    text = text.upper()
+    # רשימת התווים האסורים כולל סלאש הפוך, פסיק וסולמית
+    illegal_pattern = r'[#@*+=%^&/ , \\]'
     
-    # 1. Standardize to Uppercase
-    name = name.upper()
+    # 1. החלפת כל התווים האסורים במקף תחתון
+    cleaned = re.sub(illegal_pattern, '_', text)
     
-    # 2. Handle illegal chars at the very END of the name (Delete them)
-    # Using a loop to handle multiple illegal chars at the end like "ABC##"
-    while len(name) > 0 and re.match(illegal_chars_regex, name[-1]):
-        name = name[:-1]
+    # 2. הסרת מקפים תחתונים מסוף המחרוזת (מטפל בסימנים שהיו בסוף)
+    cleaned = cleaned.rstrip('_')
     
-    # 3. Handle illegal chars in the MIDDLE (Replace with underscore)
-    cleaned = re.sub(illegal_chars_regex, '_', name)
-    
-    # 4. Final Polish: remove double underscores and trim
-    cleaned = re.sub(r'_+', '_', cleaned).strip('_')
+    # 3. איחוד מקפים תחתונים כפולים
+    cleaned = re.sub(r'_+', '_', cleaned)
     
     return cleaned
 
@@ -61,40 +56,44 @@ def process_single_file(uploaded_file):
             zone = None
             continue
 
-        # 1. PROCESS PACKAGES
+        # --- 1. טיפול ב-PACKAGES ---
         if zone == "START":
-            # Remove everything inside parentheses
             clean_step = re.sub(r'\(.*?\)', '', stripped_line)
             clean_step = clean_step.replace('!', ' ').replace(';', ' ')
             parts = clean_step.split()
             
             if len(parts) >= 2:
                 pkg_raw = parts[0]
-                # Clean the package name while keeping valid chars like '-' and '.'
-                pkg_id = clean_package_name(pkg_raw)
+                pkg_id = clean_technical_text(pkg_raw) # ניקוי אגרסיבי לשם האריזה
                 
                 des = parts[-1]
                 val = parts[1] if len(parts) > 2 else ""
                 packages.append(f"!{pkg_id}! {val}; {des}")
 
-        # 2. PROCESS NETS
+        # --- 2. טיפול ב-NETS ---
         elif zone == "END":
             if len(raw_line) > 0 and not raw_line[0].isspace():
+                # שורה חדשה של נט
                 clean = stripped_line.replace(';', ' ').replace(',', ' ')
                 parts = clean.split()
                 if parts:
-                    current_net = parts[0]
+                    net_name_raw = parts[0]
+                    # ניקוי שם הנט לפי אותה לוגיקה
+                    current_net = clean_technical_text(net_name_raw)
+                    
                     if current_net not in nets_data:
                         nets_data[current_net] = []
                     for p in parts[1:]:
                         nets_data[current_net].append(p.replace('-', '.'))
             else:
+                # שורת המשך של נט
                 if current_net:
                     clean = stripped_line.replace(';', ' ').replace(',', ' ')
                     parts = clean.split()
                     for p in parts:
                         nets_data[current_net].append(p.replace('-', '.'))
 
+    # בניית הפלט הסופי
     output = ["$PACKAGES"]
     output.extend(packages)
     output.append("$NETS")
@@ -110,7 +109,7 @@ def process_single_file(uploaded_file):
     output.append("$End")
     return "\n".join(output)
 
-# --- STREAMLIT UI: Full Visual Style & Animation ---
+# --- STREAMLIT UI ---
 st.set_page_config(page_title="Mind-Board Converter", layout="wide")
 logo_url = "https://raw.githubusercontent.com/yurko120/netlist-converter/main/.devcontainer/MindBoard-Logo.jpg"
 
