@@ -123,7 +123,6 @@ st.markdown(f"""
         font-weight: 700 !important;
         color: #000000 !important;
     }}
-    /* Making all text on landing page sharper */
     p, span, label, .stMarkdown {{
         font-weight: 700 !important;
         color: #000000 !important;
@@ -168,7 +167,9 @@ if uploaded_files:
                 st.markdown("<br>", unsafe_allow_html=True)
 
     st.divider()
-    st.markdown('<h2 style="text-align:center; font-weight:900;">🔍 Technical Preview</h2>', unsafe_allow_html=True)
+    # תיקון המיקום: הכותרת מיושרת לשמאל (text-align: left)
+    st.markdown('<h2 style="text-align:left; font-weight:900; margin-left: 0px;">🔍 Technical Preview</h2>', unsafe_allow_html=True)
+    
     tab_titles = [item["display_name"] for item in processed_files_data]
     if tab_titles:
         tabs = st.tabs(tab_titles)
