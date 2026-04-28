@@ -8,7 +8,7 @@ def clean_technical_text(text):
         return ""
     
     text = text.upper()
-    # תווים אסורים: סולמית, שטרודל, כוכבית, פלוס, שווה, אחוז, חזקה, אמפרסנד, סלאשים, פסיק ורווח
+    # תווים אסורים: סולמית, פסיק, סלאשים, שטרודל וכו'
     illegal_pattern = r'[#@*+=%^&/ , \\]'
     
     # 1. החלפת כל תו אסור במקף תחתון
@@ -51,71 +51,63 @@ def process_single_file(uploaded_file):
         elif "$NETS" in upper_line:
             zone = "END"
             continue
-        elif stripped_line.startswith('$') and zone is not None:
+        elif stripped_line.startswith('$'):
             zone = None
             continue
 
         # --- 1. עיבוד PACKAGES ---
         if zone == "START":
-            # הסרת תוכן בסוגריים
             clean_step = re.sub(r'\(.*?\)', '', stripped_line)
             clean_step = clean_step.replace('!', ' ').replace(';', ' ')
             parts = clean_step.split()
             
             if len(parts) >= 2:
                 pkg_raw = parts[0]
-                pkg_id = clean_technical_text(pkg_raw) # ניקוי שם האריזה
-                
+                pkg_id = clean_technical_text(pkg_raw)
                 des = parts[-1]
                 val = parts[1] if len(parts) > 2 else ""
                 packages.append(f"!{pkg_id}! {val}; {des}")
 
-        # --- 2. עיבוד NETS (איסוף פינים) ---
+        # --- 2. עיבוד NETS ---
         elif zone == "END":
-            # אם השורה לא מתחילה ברווח - זה שם נט חדש
+            # אם השורה לא מתחילה ברווח - זה שם נט חדש או שורת נט תקנית
             if not line.startswith((' ', '\t')):
                 clean = stripped_line.replace(';', ' ').replace(',', ' ')
                 parts = clean.split()
                 if parts:
                     net_name_raw = parts[0]
-                    current_net = clean_technical_text(net_name_raw) # ניקוי שם הנט
+                    current_net = clean_technical_text(net_name_raw)
                     
                     if current_net not in nets_data:
                         nets_data[current_net] = []
-                    # הוספת הפינים שבאותה שורה
                     for p in parts[1:]:
                         nets_data[current_net].append(p.replace('-', '.'))
             else:
-                # שורת המשך (פינים בלבד)
+                # שורת המשך (פינים שהיו עם רווח בתחילתם)
                 if current_net:
                     clean = stripped_line.replace(';', ' ').replace(',', ' ')
                     parts = clean.split()
                     for p in parts:
                         nets_data[current_net].append(p.replace('-', '.'))
 
-    # --- 3. בניית הפלט עם פיצול לשורות (עד 10 פינים לשורה) ---
+    # --- 3. בניית הפלט עם שם הנט בכל שורה ופיצול ל-10 פינים ---
     output = ["$PACKAGES"]
     output.extend(packages)
     output.append("$NETS")
     
     for net_name, pins in nets_data.items():
-        # הסרת כפילויות ופינים ריקים
         unique_pins = []
         for p in pins:
-            p_f = p.strip()
-            if p_f and p_f not in unique_pins:
-                unique_pins.append(p_f)
+            p_clean = p.strip()
+            if p_clean and p_clean not in unique_pins:
+                unique_pins.append(p_clean)
         
         if unique_pins:
-            # פיצול הרשימה לקבוצות של 10
+            # פיצול לקבוצות של 10
             for i in range(0, len(unique_pins), 10):
-                chunk = unique_pins[i:i+10]
-                if i == 0:
-                    # שורה ראשונה: שם הנט וסמיקולון
-                    output.append(f"{net_name}; {' '.join(chunk)}")
-                else:
-                    # שורות המשך: הזחה של 5 רווחים
-                    output.append(f"     {' '.join(chunk)}")
+                chunk = unique_pins[i:i + 10]
+                # הוספת שם הנט + סמיקולון בתחילת כל שורה מפוצלת
+                output.append(f"{net_name}; {' '.join(chunk)}")
             
     output.append("$End")
     return "\n".join(output)
