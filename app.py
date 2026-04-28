@@ -2,7 +2,26 @@ import streamlit as st
 import io
 import re
 
-# --- CORE LOGIC: Netlist Transformation (Strict Character Cleaning) ---
+# --- CORE LOGIC: Specialized Cleaning Function ---
+def clean_package_name(name):
+    if not name:
+        return ""
+    
+    # Use the same list of forbidden characters
+    # If the last character is special, we'll strip it after the general replace
+    
+    # 1. First, convert all non-alphanumeric to underscores
+    cleaned = re.sub(r'[^A-Z0-9]', '_', name.upper())
+    
+    # 2. If the ORIGINAL name ended with a special character, 
+    # the cleaned version now ends with '_'. We remove it.
+    cleaned = cleaned.rstrip('_')
+    
+    # 3. Clean any double underscores in the middle
+    cleaned = re.sub(r'_+', '_', cleaned)
+    
+    return cleaned
+
 def process_single_file(uploaded_file):
     raw_bytes = uploaded_file.getvalue()
     try:
@@ -10,7 +29,6 @@ def process_single_file(uploaded_file):
     except:
         content = raw_bytes.decode('utf-8', errors='ignore')
 
-    # Normalize line endings and whitespace
     content = content.replace('\r\n', '\n').replace('\r', '\n')
     content = content.replace('\xa0', ' ').replace('\t', ' ')
     
@@ -38,23 +56,18 @@ def process_single_file(uploaded_file):
             zone = None
             continue
 
-        # 1. PROCESS PACKAGES (Total Ban on Special Characters)
+        # 1. PROCESS PACKAGES
         if zone == "START":
-            # Step A: Remove everything inside parentheses
+            # Remove content inside parentheses
             clean_step = re.sub(r'\(.*?\)', '', stripped_line)
-            # Step B: Standardize separators
             clean_step = clean_step.replace('!', ' ').replace(';', ' ')
             parts = clean_step.split()
             
             if len(parts) >= 2:
-                pkg_raw = parts[0].upper()
+                pkg_raw = parts[0] # The raw package name
                 
-                # --- CRITICAL FIX: Replace ALL non-alphanumeric chars with "_" ---
-                # This covers #, @, /, *, +, =, %, ^, &, etc.
-                pkg_id = re.sub(r'[^A-Z0-9]', '_', pkg_raw)
-                
-                # Clean up repeated underscores and leading/trailing ones
-                pkg_id = re.sub(r'_+', '_', pkg_id).strip('_')
+                # Apply the new cleaning logic
+                pkg_id = clean_package_name(pkg_raw)
                 
                 des = parts[-1]
                 val = parts[1] if len(parts) > 2 else ""
@@ -78,7 +91,6 @@ def process_single_file(uploaded_file):
                     for p in parts:
                         nets_data[current_net].append(p.replace('-', '.'))
 
-    # Building Output
     output = ["$PACKAGES"]
     output.extend(packages)
     output.append("$NETS")
@@ -94,14 +106,14 @@ def process_single_file(uploaded_file):
     output.append("$End")
     return "\n".join(output)
 
-# --- STREAMLIT UI: Animated & Sharper Visuals ---
+# --- STREAMLIT UI: Full Visual Style & Animation ---
 st.set_page_config(page_title="Mind-Board Converter", layout="wide")
 logo_url = "https://raw.githubusercontent.com/yurko120/netlist-converter/main/.devcontainer/MindBoard-Logo.jpg"
 
 st.markdown(f"""
     <style>
     @keyframes fadeInDown {{
-        0% {{ opacity: 0; transform: translateY(-20px); }}
+        0% {{ opacity: 0; transform: translateY(-30px); }}
         100% {{ opacity: 1; transform: translateY(0); }}
     }}
     .stApp {{
@@ -111,12 +123,12 @@ st.markdown(f"""
     }}
     .stApp::before {{
         content: ""; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background-color: rgba(255, 255, 255, 0.92); z-index: -1;
+        background-color: rgba(255, 255, 255, 0.93); z-index: -1;
     }}
     .centered-title {{
         text-align: center; color: #000000; font-size: 3.5em !important; 
         font-weight: 900 !important; margin-bottom: 30px !important;
-        animation: fadeInDown 1s ease-out;
+        animation: fadeInDown 0.8s ease-out;
     }}
     .bold-header {{
         font-weight: 900 !important; color: #000000 !important;
@@ -126,9 +138,10 @@ st.markdown(f"""
         background-color: rgba(255, 255, 255, 0.8) !important; 
         border: 2px solid #000000 !important;
         font-family: 'Courier New', monospace; font-weight: 700 !important;
+        color: #000000 !important;
     }}
     p, span, label, .stMarkdown {{
-        font-weight: 700 !important; color: #000000 !important;
+        font-weight: 800 !important; color: #000000 !important;
     }}
     </style>
     <h1 class="centered-title">Mind-Board Converter</h1>
@@ -145,14 +158,13 @@ if uploaded_files:
         st.markdown('<p class="bold-header">2. File Settings & Download</p>', unsafe_allow_html=True)
         for idx, f in enumerate(uploaded_files):
             with st.container():
-                st.markdown(f"**Target:** `{f.name}`")
+                st.markdown(f"**Current File:** `{f.name}`")
                 original_name = f.name.rsplit('.', 1)[0]
-                default_name = f"{original_name}_fixed"
-                custom_name = st.text_input("New Output Name:", value=default_name, key=f"n_{idx}")
+                custom_name = st.text_input("New Output Name:", value=f"{original_name}_fixed", key=f"in_{idx}")
                 full_name = f"{custom_name}.txt" if not custom_name.endswith(('.txt', '.net')) else custom_name
                 content = process_single_file(f)
                 results.append({"name": full_name, "content": content})
-                st.download_button(label=f"📥 Download {full_name}", data=content, file_name=full_name, mime="text/plain", key=f"b_{idx}", use_container_width=True)
+                st.download_button(label=f"📥 Download {full_name}", data=content, file_name=full_name, mime="text/plain", key=f"btn_{idx}", use_container_width=True)
                 st.markdown("<br>", unsafe_allow_html=True)
 
     st.divider()
@@ -161,4 +173,4 @@ if uploaded_files:
         tabs = st.tabs([r["name"] for r in results])
         for idx, tab in enumerate(tabs):
             with tab:
-                st.text_area("Data Content:", value=results[idx]["content"], height=500, key=f"t_{idx}")
+                st.text_area("Live Output Preview:", value=results[idx]["content"], height=500, key=f"txt_{idx}")
