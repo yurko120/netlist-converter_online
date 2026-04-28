@@ -2,26 +2,30 @@ import streamlit as st
 import io
 import re
 
-# --- CORE LOGIC: Precise Package Name Cleaning ---
+# --- CORE LOGIC: Strict Package Name Cleaning ---
 def clean_package_name(name):
     if not name:
         return ""
     
-    # Define ONLY the illegal characters you mentioned
-    illegal_chars = r"[#@*+=%^&/]"
+    # List of absolutely forbidden characters based on your feedback
+    # Including #, @, *, +, =, %, ^, &, /, and comma (,)
+    illegal_chars_regex = r"[#@*+=%^&/ ,]"
     
-    # 1. Handle illegal chars at the very END of the name (Delete them)
-    # We check if the last character is in our illegal list
-    while name and re.match(illegal_chars, name[-1]):
+    # 1. Standardize to Uppercase
+    name = name.upper()
+    
+    # 2. Handle illegal chars at the very END of the name (Delete them)
+    # Using a loop to handle multiple illegal chars at the end like "ABC##"
+    while len(name) > 0 and re.match(illegal_chars_regex, name[-1]):
         name = name[:-1]
     
-    # 2. Handle illegal chars in the MIDDLE (Replace with underscore)
-    cleaned = re.sub(illegal_chars, '_', name)
+    # 3. Handle illegal chars in the MIDDLE (Replace with underscore)
+    cleaned = re.sub(illegal_chars_regex, '_', name)
     
-    # 3. Clean double underscores if any were created
-    cleaned = re.sub(r'_+', '_', cleaned)
+    # 4. Final Polish: remove double underscores and trim
+    cleaned = re.sub(r'_+', '_', cleaned).strip('_')
     
-    return cleaned.upper()
+    return cleaned
 
 def process_single_file(uploaded_file):
     raw_bytes = uploaded_file.getvalue()
@@ -59,14 +63,14 @@ def process_single_file(uploaded_file):
 
         # 1. PROCESS PACKAGES
         if zone == "START":
-            # Remove parentheses content
+            # Remove everything inside parentheses
             clean_step = re.sub(r'\(.*?\)', '', stripped_line)
             clean_step = clean_step.replace('!', ' ').replace(';', ' ')
             parts = clean_step.split()
             
             if len(parts) >= 2:
                 pkg_raw = parts[0]
-                # Apply the specific cleaning logic
+                # Clean the package name while keeping valid chars like '-' and '.'
                 pkg_id = clean_package_name(pkg_raw)
                 
                 des = parts[-1]
@@ -106,7 +110,7 @@ def process_single_file(uploaded_file):
     output.append("$End")
     return "\n".join(output)
 
-# --- STREAMLIT UI: Keeping the requested style ---
+# --- STREAMLIT UI: Full Visual Style & Animation ---
 st.set_page_config(page_title="Mind-Board Converter", layout="wide")
 logo_url = "https://raw.githubusercontent.com/yurko120/netlist-converter/main/.devcontainer/MindBoard-Logo.jpg"
 
