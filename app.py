@@ -2,21 +2,19 @@ import streamlit as st
 import io
 import re
 
-# --- CORE LOGIC: Comprehensive Transformation ---
-def clean_special_chars(text):
-    """Removes specific illegal characters from Footprint names only."""
-    pattern = r"[/\\*#@&^%?]"
-    return re.sub(pattern, "", text)
-
+# --- CORE LOGIC ---
 def process_single_file(uploaded_file):
+    # Standardizing spaces and encoding
     content = uploaded_file.getvalue().decode('cp1255', errors='ignore')
+    # Replace non-breaking spaces and tabs with standard spaces
+    content = content.replace('\xa0', ' ').replace('\t', ' ')
+    
     lines = content.splitlines()
     zone = None
     packages = []
     nets_data = {}
     current_net = None
     
-    # Special characters to remove from packages: / * \ # @ & ^ % ?
     chars_to_remove = r"[/\\*#@&^%?]"
 
     for line in lines:
@@ -39,12 +37,11 @@ def process_single_file(uploaded_file):
 
         # 1. FOOTPRINTS SECTION
         if zone == "START":
-            # Remove parentheses and forbidden chars
             mod_line = re.sub(r'\(.*?\)', '', line_strip)
             mod_line = re.sub(chars_to_remove, "", mod_line)
             mod_line = mod_line.replace('!', ' ').replace(';', ' ')
-            
             parts = mod_line.split()
+            
             if len(parts) >= 2:
                 pkg_id = parts[0].replace('.', '_').replace(',', '_').upper()
                 des = parts[-1]
@@ -52,26 +49,26 @@ def process_single_file(uploaded_file):
                 if len(pkg_id) >= 2:
                     packages.append(f"!{pkg_id}! {val}; {des}")
 
-        # 2. NETS SECTION - Reconstructing connections like Q10.E
+        # 2. NETS SECTION - Robust handling for multi-line and special pins
         elif zone == "END":
-            # Clean separators but KEEP alphanumeric pin names (E, G, S, H4)
-            clean_line = line_strip.replace(',', ' ').replace(';', ' ')
-            # Convert dash to dot for pin identification
-            clean_line = clean_line.replace('-', '.')
+            # Clean comma and replace dash with dot for pins
+            clean_line = line_strip.replace(',', ' ').replace('-', '.')
             parts = clean_line.split()
-            
             if not parts: continue
 
-            # If the line starts at the beginning, it's a new Net name
-            if not raw_line.startswith((' ', '\t')):
-                current_net = parts[0]
+            # Logic to determine if this is a new Net or continuation
+            # If the original line doesn't start with space, it's a new Net name
+            if not raw_line.startswith(' '):
+                # The first part is the Net Name (remove semicolon)
+                current_net = parts[0].replace(';', '')
                 if current_net not in nets_data:
                     nets_data[current_net] = []
-                nets_data[current_net].extend(parts[1:])
+                # The rest are pins
+                nets_data[current_net].extend([p for p in parts[1:] if p != ';'])
             else:
-                # If it's indented, these are pins belonging to the last net
+                # Indented line - add pins to the current active net
                 if current_net:
-                    nets_data[current_net].extend(parts)
+                    nets_data[current_net].extend([p for p in parts if p != ';'])
 
     # Building Final Output
     final_result = ["$PACKAGES"]
@@ -79,20 +76,15 @@ def process_single_file(uploaded_file):
     final_result.append("$NETS")
     
     for net_name, pins in nets_data.items():
-        # Clean pin names and remove duplicates
-        actual_pins = [p.strip() for p in pins if p.strip()]
+        actual_pins = [p.strip() for p in pins if p.strip() and p.strip() != ';']
         if not actual_pins: continue
-        
-        # Allegro format: NetName; Pin1 Pin2 Pin3...
-        # We chunk them to 10 pins per line for readability
-        for i in range(0, len(actual_pins), 10):
-            chunk = actual_pins[i:i+10]
-            final_result.append(f"{net_name}; {' '.join(chunk)}")
+        # Output exactly in the format: NetName; Pin1 Pin2...
+        final_result.append(f"{net_name}; {' '.join(actual_pins)}")
     
     final_result.append("$End")
     return "\n".join(final_result)
 
-# --- UI LAYOUT & STYLING ---
+# --- UI LAYOUT ---
 st.set_page_config(page_title="Mind-Board Converter", layout="wide")
 logo_url = "https://raw.githubusercontent.com/yurko120/netlist-converter/main/.devcontainer/MindBoard-Logo.jpg"
 
