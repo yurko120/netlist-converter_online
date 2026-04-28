@@ -37,7 +37,7 @@ def process_single_file(uploaded_file):
 
         # Processing Footprints Section
         if zone == "START":
-            # Apply global character cleaning first
+            # Apply global character cleaning to the line
             line = clean_special_chars(line)
             clean_line = line.replace('!', ' ').replace(';', ' ')
             parts = clean_line.split()
@@ -59,20 +59,22 @@ def process_single_file(uploaded_file):
 
         # Processing Nets Section
         elif zone == "END":
-            # Apply global character cleaning
-            line = clean_special_chars(line)
-            # Convert pin separator '-' to '.'
+            # IMPORTANT: We DO NOT apply clean_special_chars here to preserve pin names like GND, E, B, etc.
+            # Convert pin separator '-' to '.' (e.g., U1-E -> U1.E)
             processed_line = line.replace('-', '.')
+            # Only clean separators used for structure, keeping the pin names intact
             clean_line = processed_line.replace(',', ' ').replace(';', ' ')
             parts = clean_line.split()
             if not parts: continue
             
+            # If the line doesn't start with space/tab, it's a new Net name
             if not raw_line.startswith((' ', '\t')):
                 current_net = parts[0]
                 if current_net not in nets_data:
                     nets_data[current_net] = []
                 nets_data[current_net].extend(parts[1:])
             else:
+                # If it starts with space/tab, these are pins belonging to the current_net
                 if current_net:
                     nets_data[current_net].extend(parts)
 
@@ -81,6 +83,7 @@ def process_single_file(uploaded_file):
     final_output.extend(packages)
     final_output.append("$NETS")
     for net_name, pins in nets_data.items():
+        # Filtering out empty strings and semicolons, but KEEPING names like GND, E, B
         actual_pins = [p.strip() for p in pins if p.strip() and p.strip() != ';']
         if not actual_pins: continue
         for i in range(0, len(actual_pins), 10):
