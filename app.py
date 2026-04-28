@@ -30,7 +30,6 @@ def process_single_file(uploaded_file):
             
         upper_line = stripped_line.upper()
 
-        # Section Detection
         if "$PACKAGES" in upper_line:
             zone = "START"
             continue
@@ -55,7 +54,6 @@ def process_single_file(uploaded_file):
 
         # 2. PROCESS NETS
         elif zone == "END":
-            # If line starts at index 0 with no space, it's a new Net name
             if len(raw_line) > 0 and not raw_line[0].isspace():
                 clean = stripped_line.replace(';', ' ').replace(',', ' ')
                 parts = clean.split()
@@ -72,7 +70,6 @@ def process_single_file(uploaded_file):
                     for p in parts:
                         nets_data[current_net].append(p.replace('-', '.'))
 
-    # --- BUILDING OUTPUT ---
     output = ["$PACKAGES"]
     output.extend(packages)
     output.append("$NETS")
@@ -88,13 +85,18 @@ def process_single_file(uploaded_file):
     output.append("$End")
     return "\n".join(output)
 
-# --- STREAMLIT UI: Full Visual Style ---
+# --- STREAMLIT UI: Full Visual Style & Animation ---
 st.set_page_config(page_title="Mind-Board Converter", layout="wide")
 
 logo_url = "https://raw.githubusercontent.com/yurko120/netlist-converter/main/.devcontainer/MindBoard-Logo.jpg"
 
 st.markdown(f"""
     <style>
+    @keyframes fadeInDown {{
+        0% {{ opacity: 0; transform: translateY(-20px); }}
+        100% {{ opacity: 1; transform: translateY(0); }}
+    }}
+    
     .stApp {{
         background-image: url("{logo_url}");
         background-repeat: no-repeat; background-attachment: fixed;
@@ -105,38 +107,48 @@ st.markdown(f"""
         background-color: rgba(255, 255, 255, 0.92); z-index: -1;
     }}
     .centered-title {{
-        text-align: center; color: #000000; font-size: 3em !important; 
+        text-align: center; color: #000000; font-size: 3.5em !important; 
         font-weight: 900 !important; margin-bottom: 30px !important;
+        animation: fadeInDown 1s ease-out;
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+    }}
+    .bold-header {{
+        font-weight: 900 !important; color: #000000 !important;
+        font-size: 1.6em !important; margin-bottom: 15px !important;
     }}
     .stTextArea textarea {{
-        background-color: rgba(255, 255, 255, 0.6) !important; 
+        background-color: rgba(255, 255, 255, 0.8) !important; 
         border: 2px solid #000000 !important;
-        font-family: 'Courier New', monospace; font-weight: 800 !important; 
+        font-family: 'Courier New', monospace; 
+        font-weight: 700 !important;
+        color: #000000 !important;
+    }}
+    /* Making all text on landing page sharper */
+    p, span, label, .stMarkdown {{
+        font-weight: 700 !important;
+        color: #000000 !important;
     }}
     </style>
     <h1 class="centered-title">Mind-Board Converter</h1>
     """, unsafe_allow_html=True)
 
-# Layout setup: Two Columns
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("### **1. Upload Source Files**")
+    st.markdown('<p class="bold-header">1. Upload Source Files</p>', unsafe_allow_html=True)
     uploaded_files = st.file_uploader("Upload .NET files", accept_multiple_files=True, label_visibility="collapsed")
 
 if uploaded_files:
     processed_files_data = []
     with col2:
-        st.markdown("### **2. File Settings & Download**")
+        st.markdown('<p class="bold-header">2. File Settings & Download</p>', unsafe_allow_html=True)
         for idx, f in enumerate(uploaded_files):
             with st.container():
-                st.markdown(f"**Original File:** `{f.name}`")
-                
-                # Filename logic
+                st.markdown(f"**Target:** `{f.name}`")
                 original_name = f.name.rsplit('.', 1)[0]
-                default_name = f"{original_name}_transformed"
+                default_name = f"{original_name}_fixed"
                 
-                custom_name = st.text_input("Enter Output Name:", 
+                custom_name = st.text_input("New Output Name:", 
                                             value=default_name, 
                                             key=f"name_input_{idx}")
                 
@@ -146,7 +158,7 @@ if uploaded_files:
                 processed_files_data.append({"display_name": full_filename, "content": content})
                 
                 st.download_button(
-                    label=f"Download {full_filename}", 
+                    label=f"📥 Download {full_filename}", 
                     data=content, 
                     file_name=full_filename, 
                     mime="text/plain", 
@@ -156,13 +168,13 @@ if uploaded_files:
                 st.markdown("<br>", unsafe_allow_html=True)
 
     st.divider()
-    st.subheader("🔍 Technical Preview")
+    st.markdown('<h2 style="text-align:center; font-weight:900;">🔍 Technical Preview</h2>', unsafe_allow_html=True)
     tab_titles = [item["display_name"] for item in processed_files_data]
     if tab_titles:
         tabs = st.tabs(tab_titles)
         for idx, tab in enumerate(tabs):
             with tab:
-                st.text_area(f"Preview: {processed_files_data[idx]['display_name']}", 
-                             value=processed_files_data[idx]['content'], 
-                             height=450, 
+                st.text_area(f"Data Preview:", 
+                             value=processed_files_data[idx]["content"], 
+                             height=500, 
                              key=f"preview_text_{idx}")
